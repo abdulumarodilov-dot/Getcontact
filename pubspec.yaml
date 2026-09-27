@@ -1,4 +1,4 @@
-name: getcontact
+name: Getcontact
 description: Ma'lumotlar qidiruvi — lokal SQLite bazasidan qidirish
 publish_to: 'none'
 version: 1.0.0+1
@@ -47,8 +47,7 @@ flutter:
 # Yangilash: flutter pub run flutter_launcher_icons
 flutter_launcher_icons:
   android: true
-  ios: true
-  remove_alpha_ios: true
+  ios: false
   image_path: "assets/icon.png"
   adaptive_icon_background: "#05193F"
   adaptive_icon_foreground: "assets/icon.png"
