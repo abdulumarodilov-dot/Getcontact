@@ -1,0 +1,47 @@
+name: Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Platforma papkalarini yaratish
+        run: flutter create --platforms=android .
+
+      - name: Android sozlamalarini qo'llash
+        run: bash tool/patch_android.sh
+
+      - name: Paketlar
+        run: flutter pub get
+
+      - name: Ikonka va yuklash ekrani
+        run: |
+          dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
+
+      - name: APK yig'ish
+        run: flutter build apk --release
+
+      - name: APK'ni saqlash
+        uses: actions/upload-artifact@v4
+        with:
+          name: getcontact-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
