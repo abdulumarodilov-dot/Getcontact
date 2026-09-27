@@ -309,13 +309,11 @@ class DbService {
   /// Tanlangan faylning yo'lini qaytaradi (hali ko'chirilmagan).
   Future<String?> pickDatabaseFile() async {
     try {
-      final res = await FilePicker.pickFiles(
-        type: FileType.any,
-        allowMultiple: false,
-      );
-      if (res == null || res.files.isEmpty) return null;
-
-      final picked = res.files.first.path;
+      final files = await FilePicker.pickFiles(
+  type: FileType.any,
+);
+if (files == null || files.isEmpty) return null;
+final picked = files.first.path;
       if (picked == null) return null;
 
       final ext = p.extension(picked).toLowerCase();
