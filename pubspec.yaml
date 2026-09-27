@@ -1,0 +1,65 @@
+name: getcontact
+description: Ma'lumotlar qidiruvi — lokal SQLite bazasidan qidirish
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+  flutter: '>=3.35.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # SQLite + SQLCipher (AES-256 shifrlash)
+  sqflite_sqlcipher: ^3.4.1
+
+  # Fayl yo'llari (Android + iOS)
+  path_provider: ^2.1.2
+  path: ^1.8.3
+
+  # Fayl tanlash (bazani import qilish uchun)
+  # 8.0.4 dan past versiyalar Flutter v1 embedding'ga tayanadi — build buziladi.
+  # 11.0.0 dan boshlab API o'zgargan (FilePicker.platform olib tashlangan).
+  file_picker: '>=8.0.4 <11.0.0'
+
+  # Ruxsatlar (Android)
+  permission_handler: ^11.2.0
+
+  # Kirish paroli hash'i
+  shared_preferences: ^2.2.2
+  crypto: ^3.0.3
+
+  # Baza kalitini Keystore/Keychain'da saqlash
+  flutter_secure_storage: ^11.2.0
+
+dev_dependencies:
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.10
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+
+# ── APK / iOS ikonkasi ────────────────────────────────
+# Yangilash: flutter pub run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/icon.png"
+  adaptive_icon_background: "#05193F"
+  adaptive_icon_foreground: "assets/icon.png"
+
+# ── Yuklash ekrani (Loading...) ───────────────────────
+# Yangilash: dart run flutter_native_splash:create
+flutter_native_splash:
+  color: "#05193F"
+  image: "assets/splash_logo.png"
+  android: true
+  ios: true
+  android_12:
+    color: "#05193F"
+    image: "assets/splash_logo.png"
