@@ -9,7 +9,9 @@ import '../widgets/result_card.dart';
 import 'settings_screen.dart';
 
 const int kMinChars = 1;
+const int kMinCharsName = 2; // abonent uchun — LIKE qidiruv kengroq
 const Duration kDebounce = Duration(milliseconds: 300);
+const Duration kDebounceeName = Duration(milliseconds: 400);
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -116,7 +118,8 @@ class _SearchScreenState extends State<SearchScreen> {
     _debounce?.cancel();
     final q = _query.text.trim();
 
-    if (q.length < kMinChars) {
+    final minChars = _column == 'abonent' ? kMinCharsName : kMinChars;
+    if (q.length < minChars) {
       _seq++;
       setState(() {
         _results = [];
@@ -130,7 +133,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
     // Tozalash tugmasi darhol ko'rinishi uchun
     setState(() {});
-    _debounce = Timer(kDebounce, _search);
+    final delay = _column == 'abonent' ? kDebounceeName : kDebounce;
+    _debounce = Timer(delay, _search);
   }
 
   Future<void> _search() async {
