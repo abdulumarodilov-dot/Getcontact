@@ -68,8 +68,8 @@ class SearchColumn {
 }
 
 const List<SearchColumn> searchColumns = [
-  SearchColumn('telefon', 'Telefon', '998901234567', Icons.phone_outlined),
-  SearchColumn('abonent', 'Abonent', 'Ali Valiyev', Icons.person_outline),
+  SearchColumn('telefon', 'Telefon', '921929884', Icons.phone_outlined),
+  SearchColumn('abonent', 'Abonent', 'F.I.SH.', Icons.person_outline),
   SearchColumn('pasport', 'Pasport', 'AA1234567', Icons.description_outlined),
-  SearchColumn('jshshir', 'JShShIR', '12345678901234', Icons.storage_outlined),
+  SearchColumn('jshshir', 'JShShIR', '32345678901234', Icons.storage_outlined),
 ];
