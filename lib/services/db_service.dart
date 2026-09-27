@@ -309,7 +309,7 @@ class DbService {
   /// Tanlangan faylning yo'lini qaytaradi (hali ko'chirilmagan).
   Future<String?> pickDatabaseFile() async {
     try {
-      final res = await FilePicker.platform.pickFiles(
+      final res = await FilePicker.pickFiles(
         type: FileType.any,
         allowMultiple: false,
       );
