@@ -1,4 +1,4 @@
-name: Getcontact
+name: getcontact
 description: Ma'lumotlar qidiruvi — lokal SQLite bazasidan qidirish
 publish_to: 'none'
 version: 1.0.0+1
