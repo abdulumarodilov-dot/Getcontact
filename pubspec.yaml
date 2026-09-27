@@ -21,7 +21,7 @@ dependencies:
   # Fayl tanlash (bazani import qilish uchun)
   # 8.0.4 dan past versiyalar Flutter v1 embedding'ga tayanadi — build buziladi.
   # 11.0.0 dan boshlab API o'zgargan (FilePicker.platform olib tashlangan).
-  file_picker: '>=8.0.4 <11.0.0'
+  file_picker: ^13.1.0
 
   # Ruxsatlar (Android)
   permission_handler: ^11.2.0
