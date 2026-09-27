@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:characters/characters.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
@@ -310,10 +311,11 @@ class DbService {
   Future<String?> pickDatabaseFile() async {
     try {
       final files = await FilePicker.pickFiles(
-  type: FileType.any,
-);
-if (files == null || files.isEmpty) return null;
-final picked = files.first.path;
+        type: FileType.any,
+      );
+      if (files == null || files.isEmpty) return null;
+
+      final picked = files.first.path;
       if (picked == null) return null;
 
       final ext = p.extension(picked).toLowerCase();
@@ -422,22 +424,206 @@ final picked = files.first.path;
   }
 
   // ──────────────────────────────────────────────────────────
+  // Lotin ↔ Kiril transliteratsiya
+  // ──────────────────────────────────────────────────────────
+
+  /// Lotin harflarini mos kiril harflariga almashtiradi (kichik harf).
+  /// Faqat o'zbek alifbosiga xos harflar ko'rib chiqiladi.
+  static const _latinToCyrillic = <String, String>{
+    "a": "а", "b": "б", "d": "д", "e": "е", "f": "ф",
+    "g": "г", "h": "х", "i": "и", "j": "ж", "k": "к",
+    "l": "л", "m": "м", "n": "н", "o": "о", "p": "п",
+    "q": "қ", "r": "р", "s": "с", "t": "т", "u": "у",
+    "v": "в", "x": "х", "y": "й", "z": "з",
+    // Digraflar (avval tekshiriladi)
+    "sh": "ш", "ch": "ч", "ng": "нг", "gh": "ғ",
+    "o'": "ў", "o`": "ў", "g'": "ғ", "g`": "ғ",
+  };
+
+  static const _cyrillicToLatin = <String, String>{
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d",
+    "е": "e", "ё": "yo", "ж": "j", "з": "z", "и": "i",
+    "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
+    "о": "o", "п": "p", "р": "r", "с": "s", "т": "t",
+    "у": "u", "ф": "f", "х": "x", "ц": "ts", "ч": "ch",
+    "ш": "sh", "щ": "sh", "ъ": "", "ы": "i", "ь": "",
+    "э": "e", "ю": "yu", "я": "ya",
+    "ғ": "g'", "қ": "q", "ҳ": "h", "ў": "o'", "ъ": "",
+  };
+
+  // ──────────────────────────────────────────────────────────
+  // O'zbek fonetik ekvivalentlari (bir tovush — bir necha yozuv)
+  // ──────────────────────────────────────────────────────────
+
+  /// Lotin harfi → unga fonetik ekvivalent lotin harflari ro'yxati.
+  /// Masalan: "q" yozsangiz bazada "k" yoki "q" bo'lishi mumkin.
+  static const _latinEquiv = <String, List<String>>{
+    // Qattiq/yumshoq juftliklar
+    'q': ['q', 'k'],     // qurbonov / kurbonov
+    'k': ['k', 'q'],
+    'x': ['x', 'h'],     // xasan / hasan
+    'h': ['h', 'x'],
+    "o'": ["o'", 'u', 'o'], // o'g'li / ugli
+    'u':  ['u', "o'"],
+    "g'": ["g'", 'g'],   // g'ayrat / gayrat
+    'g': ['g', "g'"],
+  };
+
+  /// Kiril harfi → fonetik ekvivalent kiril harflari.
+  static const _cyrillicEquiv = <String, List<String>>{
+    'қ': ['қ', 'к'],
+    'к': ['к', 'қ'],
+    'х': ['х', 'ҳ'],
+    'ҳ': ['ҳ', 'х'],
+    'ў': ['ў', 'у', 'о'],
+    'у': ['у', 'ў'],
+    'ғ': ['ғ', 'г'],
+    'г': ['г', 'ғ'],
+  };
+
+  /// Matnni LIKE pattern'ga aylantiradi: fonetik ekvivalent harflar
+  /// o'rniga `%` qo'yiladi, shunda SQLite bir belgini har ikkala
+  /// variantda topadi.
+  ///
+  /// Misol: "qurbonov" → "k%rbono%" (q→k%, o'→u sababli oxirgi v ham %)
+  /// Amalda har bir ekvivalent harfni `_` (bir belgi wildcard) bilan
+  /// almashtiramiz, `%` emas — chunki biz belgini O'CHIRMAYMIZ, almashtirAMIZ.
+  static String _fuzzyPattern(String lower, {required bool cyrillic}) {
+    final equiv = cyrillic ? _cyrillicEquiv : _latinEquiv;
+    final buf = StringBuffer();
+    var i = 0;
+
+    while (i < lower.length) {
+      bool found = false;
+      // Avval 3, keyin 2 belgili digraflarni tekshir
+      for (final len in [3, 2]) {
+        if (i + len <= lower.length) {
+          final sub = lower.substring(i, i + len);
+          if (equiv.containsKey(sub)) {
+            buf.write('_'); // Bir belgiga o'xshash wildcard (tovush bitta)
+            i += len;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        final single = lower[i];
+        if (equiv.containsKey(single)) {
+          buf.write('_'); // Fonetik ekvivalent — wildcard
+        } else {
+          buf.write(single); // Oddiy harf — o'ziga o'zi
+        }
+        i++;
+      }
+    }
+    return buf.toString();
+  }
+
+  /// Kiritilgan so'zni LIKE pattern variantlari ro'yxatiga aylantiradi:
+  /// asl + lotin↔kiril tarjimasi + fuzzy pattern.
+  static List<String> _searchPatterns(String raw) {
+    final lower = raw.toLowerCase().trim();
+    final patterns = <String>{};
+
+    // ── 1. Asl matn (lotin yoki kiril) ──────────────────────
+    patterns.add('%$lower%');
+
+    // ── 2. Kiril → Lotin ────────────────────────────────────
+    final buf1 = StringBuffer();
+    for (final c in lower.characters) {
+      buf1.write(_cyrillicToLatin[c] ?? c);
+    }
+    final asLatin = buf1.toString();
+    patterns.add('%$asLatin%');
+
+    // ── 3. Lotin → Kiril (digraflarni avval) ─────────────────
+    final buf2 = StringBuffer();
+    var j = 0;
+    while (j < lower.length) {
+      bool found = false;
+      for (final len in [3, 2]) {
+        if (j + len <= lower.length) {
+          final sub = lower.substring(j, j + len);
+          if (_latinToCyrillic.containsKey(sub)) {
+            buf2.write(_latinToCyrillic[sub]);
+            j += len;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        buf2.write(_latinToCyrillic[lower[j]] ?? lower[j]);
+        j++;
+      }
+    }
+    final asCyrillic = buf2.toString();
+    patterns.add('%$asCyrillic%');
+
+    // ── 4. Fuzzy: lotin variantida fonetik wildcard ──────────
+    final fuzzyLatin = _fuzzyPattern(asLatin, cyrillic: false);
+    patterns.add('%$fuzzyLatin%');
+
+    // ── 5. Fuzzy: kiril variantida fonetik wildcard ──────────
+    final fuzzyCyrillic = _fuzzyPattern(asCyrillic, cyrillic: true);
+    patterns.add('%$fuzzyCyrillic%');
+
+    return patterns.toList();
+  }
+
+  // ──────────────────────────────────────────────────────────
   // Qidiruv
   // ──────────────────────────────────────────────────────────
 
-  /// Aniq moslik bo'yicha qidirish.
-  /// sqflite so'rovlari platforma oqimida bajariladi — UI qotib qolmaydi.
+  /// Foydalanuvchi `%` yozganmi tekshiradi.
+  /// `%urb%nov` → true (manual wildcard rejimi)
+  static bool _hasWildcard(String q) => q.contains('%') || q.contains('_');
+
+  /// `abonent` ustuni uchun:
+  ///   • `%` bo'lsa — foydalanuvchi o'zi LIKE pattern yozgan,
+  ///     to'g'ridan-to'g'ri shu pattern bilan qidiradi.
+  ///   • `%` bo'lmasa — lotin/kiril + fonetik fuzzy variantlar.
+  /// Boshqa ustunlar uchun aniq moslik.
   Future<List<DbRecord>> search(String column, String query) async {
     final db = _db;
     if (db == null) throw StateError('Baza ochilmagan');
 
-    final rows = await db.rawQuery(
-      'SELECT * FROM "$kTable" WHERE "$column" = ? LIMIT $kMaxResults',
-      [query],
-    );
+    List<Map<String, Object?>> rows;
 
+    if (column == 'abonent') {
+      if (_hasWildcard(query)) {
+        // ── Manual wildcard rejimi: %urb%nov ──────────────────
+        // Foydalanuvchi o'zi % qo'ygan — bir pattern, to'g'ridan-to'g'ri LIKE
+        rows = await db.rawQuery(
+          'SELECT * FROM "$kTable" WHERE lower("$column") LIKE lower(?) LIMIT $kMaxResults',
+          [query.toLowerCase()],
+        );
+      } else {
+        // ── Avtomatik: lotin/kiril + fonetik fuzzy ────────────
+        final patterns = _searchPatterns(query);
+        final conditions = patterns
+            .map((_) => 'lower("$column") LIKE lower(?)')
+            .toList();
+        final sql =
+            'SELECT * FROM "$kTable" WHERE ${conditions.join(' OR ')} LIMIT $kMaxResults';
+        rows = await db.rawQuery(sql, patterns);
+      }
+    } else {
+      // Telefon, pasport, jshshir — aniq moslik
+      rows = await db.rawQuery(
+        'SELECT * FROM "$kTable" WHERE "$column" = ? LIMIT $kMaxResults',
+        [query],
+      );
+    }
+
+    // Takroriy satrlarni olib tashlash (bir necha variant bir qatorni topsa)
+    final seen = <Object?>{};
     final out = <DbRecord>[];
     for (final row in rows) {
+      final id = row['rowid'] ?? row.values.join('\x00');
+      if (!seen.add(id)) continue;
+
       final rec = <MapEntry<String, String>>[];
       row.forEach((key, value) {
         if (value == null) return;
@@ -445,7 +631,7 @@ final picked = files.first.path;
         if (s.isEmpty) return;
         rec.add(MapEntry(key, s));
       });
-      out.add(rec);
+      if (rec.isNotEmpty) out.add(rec);
     }
     return out;
   }
