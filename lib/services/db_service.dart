@@ -9,7 +9,13 @@ import 'package:file_picker/file_picker.dart';
 
 const List<String> kDbNames = ['royxat.db', 'ochiq.db'];
 const String kTable = 'royxat';
-const int kMaxResults = 200;
+/// Ekranda ko'rsatiladigan natijalar soni — eng o'xshashlari.
+const int kMaxResults = 10;
+
+/// Bazadan olinadigan nomzodlar soni. Ulardan eng o'xshash
+/// `kMaxResults` tasi tanlanadi. Katta bo'lsa saralash sifatli,
+/// lekin so'rov sekinroq bo'ladi.
+const int kCandidatePool = 120;
 
 /// Bitta yozuv: (ustun nomi, qiymat) juftliklari.
 /// Diqqat: `Record` nomi Dart 3'da band, shuning uchun `DbRecord`.
@@ -426,8 +432,78 @@ class DbService {
   // Qidiruv
   // ──────────────────────────────────────────────────────────
 
+  // ──────────────────────────────────────────────────────────
+  // Indekslar
+  // ──────────────────────────────────────────────────────────
+
+  /// Indeksi bor ustunlar: ustun nomi → solishtirish usuli
+  /// ('BINARY' yoki 'NOCASE'). Bazadan bir marta o'qiladi.
+  Map<String, String>? _indexes;
+
+  /// Kesh qaysi baza uchun olingani. Boshqa baza ochilsa —
+  /// kesh o'z-o'zidan eskiradi va qayta o'qiladi.
+  Database? _indexesFor;
+
+  /// `abonent` ustunida indeks bormi. Bo'lmasa qidiruv butun
+  /// jadvalni ko'rib chiqadi — katta bazada bu juda sekin.
+  bool get isNameIndexed =>
+      identical(_indexesFor, _db) &&
+      (_indexes?.containsKey('abonent') ?? false);
+
+  Future<Map<String, String>> _indexInfo(Database db) async {
+    final cached = _indexes;
+    if (cached != null && identical(_indexesFor, db)) return cached;
+
+    final found = <String, String>{};
+    try {
+      final list = await db.rawQuery('PRAGMA index_list("$kTable")');
+      for (final idx in list) {
+        final name = idx['name']?.toString();
+        if (name == null) continue;
+
+        final cols = await db.rawQuery('PRAGMA index_xinfo("$name")');
+        for (final c in cols) {
+          // Faqat indeksning BIRINCHI ustuni qidiruvda yordam beradi
+          if ((c['seqno'] as num?)?.toInt() != 0) continue;
+          final col = c['name']?.toString();
+          if (col == null) continue;
+
+          final coll = (c['coll']?.toString() ?? 'BINARY').toUpperCase();
+          // NOCASE qulayroq — registrni o'zi hisobga oladi
+          if (found[col] != 'NOCASE') found[col] = coll;
+        }
+      }
+    } catch (_) {
+      // PRAGMA ishlamasa — indekssiz deb hisoblaymiz
+    }
+    _indexes = found;
+    _indexesFor = db;
+    return found;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Qidiruv patternlari
+  // ──────────────────────────────────────────────────────────
+
   /// Matn faqat ASCII belgilardan iboratmi?
   static bool _isAscii(String s) => s.codeUnits.every((c) => c < 128);
+
+  /// Unicode'dagi eng katta belgi — diapazonning yuqori chegarasi.
+  /// "urazov" ... "urazov\u{10FFFF}" oralig'i — "urazov" bilan
+  /// boshlanadigan barcha satrlarni qamrab oladi.
+  static const String _maxChar = '\u{10FFFF}';
+
+  /// So'rovning registr variantlari: yozilgani, KATTA, kichik, Bosh Harf.
+  /// Indeks registrni bilmaydi, shuning uchun har biri alohida
+  /// qidiriladi — hammasi indeks orqali, shuning uchun tez.
+  static List<String> _caseVariants(String q) {
+    final title = q
+        .split(' ')
+        .map((w) =>
+            w.isEmpty ? w : w[0].toUpperCase() + w.substring(1).toLowerCase())
+        .join(' ');
+    return <String>{q, q.toUpperCase(), q.toLowerCase(), title}.toList();
+  }
 
   /// LIKE'da qochirish belgisi sifatida `\` ishlatiladi.
   /// Dart satrida bitta teskari chiziq — '\\'.
@@ -461,33 +537,95 @@ class DbService {
     return b.toString();
   }
 
-  /// `abonent` ustuni uchun — faqat kichik/katta harfga e'tibor bermaydigan
-  /// oddiy qidiruv (matn ichidan qism sifatida izlaydi).
-  /// Transliteratsiya, fuzzy va wildcard rejimlari o'chirilgan.
+  /// Natijaning so'rovga qanchalik yaqinligi. Kichik son — yaxshiroq.
+  ///
+  ///   0 — to'liq bir xil            ("Urazov"    ← "urazov")
+  /// 1xx — nomning boshidan          ("Urazov A." ← "ura")
+  /// 2xx — biror so'zning boshidan   ("Akmal Ur." ← "ur")
+  /// 3xx — so'z o'rtasidan           ("Burazov"   ← "razov")
+  ///
+  /// Oxirgi ikki xonasi — moslik nechanchi belgidan boshlangani:
+  /// oldinroq boshlansa, natija yuqoriroq turadi.
+  static int _similarity(String value, String needle) {
+    final v = value.toLowerCase();
+    if (v == needle) return 0;
+
+    final i = v.indexOf(needle);
+    if (i < 0) return 900; // bo'lmasligi kerak, ehtiyot uchun
+
+    final int rank;
+    if (i == 0) {
+      rank = 1;
+    } else {
+      final prev = v[i - 1];
+      rank = (prev == ' ' || prev == '-' || prev == "'") ? 2 : 3;
+    }
+    return rank * 100 + (i > 99 ? 99 : i);
+  }
+
+  /// `abonent` ustuni uchun — kichik/katta harfga e'tibor bermaydigan qidiruv.
+  ///
+  ///   • Ustunda indeks bo'lsa — ism BOSHIDAN qidiriladi (indeks orqali,
+  ///     baza hajmidan qat'i nazar bir zumda).
+  ///   • Indeks bo'lmasa — matn ICHIDAN qidiriladi (butun jadval
+  ///     ko'rib chiqiladi, katta bazada sekin).
+  ///
+  /// Natijalar o'xshashlik bo'yicha saralanadi, eng yaqin
+  /// `kMaxResults` tasi qaytariladi.
   ///
   /// Boshqa ustunlar (telefon, pasport, jshshir) uchun — aniq moslik.
   Future<List<DbRecord>> search(String column, String query) async {
     final db = _db;
     if (db == null) throw StateError('Baza ochilmagan');
 
+    final indexes = await _indexInfo(db);
     List<Map<String, Object?>> rows;
 
     if (column == 'abonent') {
       final q = query.trim();
       if (q.isEmpty) return const [];
 
-      // Lotin uchun LIKE — SQLite uni ASCII bo'yicha o'zi registrsiz
-      // solishtiradi, bu eng tez yo'l. Kiril uchun esa GLOB kerak.
-      final useLike = _isAscii(q);
-      final sql = useLike
-          ? 'SELECT * FROM "$kTable" WHERE "$column" LIKE ? '
-                "ESCAPE '$_bs' LIMIT $kMaxResults"
-          : 'SELECT * FROM "$kTable" WHERE "$column" GLOB ? LIMIT $kMaxResults';
+      final coll = indexes['abonent'];
 
-      rows = await db.rawQuery(
-        sql,
-        [useLike ? _likePattern(q) : _globPattern(q)],
-      );
+      if (coll != null) {
+        // ── Indeks bor: ism BOSHIDAN qidiramiz ──────────────
+        // Diapazon (>= va <) bo'yicha solishtirish indeksni
+        // ishlatadi va baza hajmidan qat'i nazar bir zumda ishlaydi.
+        // LIKE '%matn%' esa indeksni ishlata olmaydi — u 15 GB lik
+        // faylni to'liq o'qishga majbur qilardi.
+        final collate = coll == 'NOCASE' ? ' COLLATE NOCASE' : '';
+        final variants = _caseVariants(q);
+
+        final cond = List.filled(
+          variants.length,
+          '("$column" >= ?$collate AND "$column" < ?$collate)',
+        ).join(' OR ');
+
+        final params = <String>[];
+        for (final v in variants) {
+          params.add(v);
+          params.add(v + _maxChar);
+        }
+
+        rows = await db.rawQuery(
+          'SELECT * FROM "$kTable" WHERE $cond LIMIT $kCandidatePool',
+          params,
+        );
+      } else {
+        // ── Indeks yo'q: butun jadvalni ko'rib chiqishga majburmiz.
+        // Bu sekin, lekin matn ichidan ham topadi.
+        final useLike = _isAscii(q);
+        final sql = useLike
+            ? 'SELECT * FROM "$kTable" WHERE "$column" LIKE ? '
+                  "ESCAPE '$_bs' LIMIT $kCandidatePool"
+            : 'SELECT * FROM "$kTable" WHERE "$column" GLOB ? '
+                  'LIMIT $kCandidatePool';
+
+        rows = await db.rawQuery(
+          sql,
+          [useLike ? _likePattern(q) : _globPattern(q)],
+        );
+      }
     } else {
       // Telefon, pasport, jshshir — aniq moslik
       rows = await db.rawQuery(
@@ -496,13 +634,41 @@ class DbService {
       );
     }
 
-    // Takroriy satrlarni olib tashlash
-    final seen = <Object?>{};
-    final out = <DbRecord>[];
+    // ── Takroriy satrlarni olib tashlash ────────────────────
+    final seen = <String>{};
+    final uniq = <Map<String, Object?>>[];
     for (final row in rows) {
-      final id = row['rowid'] ?? row.values.join('\x00');
-      if (!seen.add(id)) continue;
+      if (seen.add(row.values.join('\x00'))) uniq.add(row);
+    }
 
+    // ── abonent: o'xshashlik bo'yicha saralab, eng yaxshilarini olamiz ──
+    List<Map<String, Object?>> best;
+    if (column == 'abonent' && uniq.length > 1) {
+      final needle = query.trim().toLowerCase();
+
+      // Ballni bir marta hisoblaymiz (sort ichida emas — tezroq)
+      final scored = uniq
+          .map((row) => (
+                score: _similarity(row['abonent']?.toString() ?? '', needle),
+                length: (row['abonent']?.toString() ?? '').length,
+                row: row,
+              ))
+          .toList();
+
+      scored.sort((a, b) {
+        if (a.score != b.score) return a.score.compareTo(b.score);
+        // Bir xil ball — qisqaroq ism yuqorida (ortiqcha so'zi kam)
+        return a.length.compareTo(b.length);
+      });
+
+      best = scored.take(kMaxResults).map((e) => e.row).toList();
+    } else {
+      best = uniq.take(kMaxResults).toList();
+    }
+
+    // ── Ko'rsatish uchun (ustun, qiymat) juftliklariga aylantiramiz ──
+    final out = <DbRecord>[];
+    for (final row in best) {
       final rec = <MapEntry<String, String>>[];
       row.forEach((key, value) {
         if (value == null) return;
