@@ -1,0 +1,21 @@
+# iOS ikonkasi uchun alohida konfiguratsiya.
+# Ishlatish: dart run flutter_launcher_icons -f tool/icons_ios.yaml
+#
+# Nega alohida fayl kerak?
+# pubspec.yaml dagi konfiguratsiyada "android: true" turibdi. macOS
+# runner'da esa faqat ios/ papkasi yaratiladi — android/ umuman yo'q.
+# Shu sababli flutter_launcher_icons Android ikonkalarini yasab bo'lib,
+# AndroidManifest.xml ni o'qimoqchi bo'lganda qulab tushadi.
+#
+# Nega icon_ios.png alohida?
+# iOS ikonkalarida shaffoflik bo'lishi mumkin emas. 0.13.1 da
+# "background_color_ios" parametri yo'q — "remove_alpha_ios" esa fonni
+# OQ rangga to'ldiradi. Shuning uchun to'q ko'k fon rasmning ichiga
+# oldindan singdirilgan (assets/icon_ios.png, RGB, alfa kanalsiz).
+
+flutter_launcher_icons:
+  android: false
+  ios: true
+  image_path: "assets/icon_ios.png"
+  image_path_ios: "assets/icon_ios.png"
+  remove_alpha_ios: true
