@@ -26,24 +26,32 @@ jobs:
       - name: Paketlar
         run: flutter pub get
 
-      - name: Ikonka va yuklash ekrani
+      # DIQQAT: pubspec.yaml dagi konfiguratsiya Android uchun mo'ljallangan.
+      # Bu runner'da android/ papkasi yo'q, shuning uchun iOS'ning
+      # o'z konfiguratsiya fayllarini ishlatamiz (-f / --path).
+      - name: Ikonka va yuklash ekrani (faqat iOS)
         run: |
-          dart run flutter_launcher_icons
-          dart run flutter_native_splash:create
+          dart run flutter_launcher_icons -f tool/icons_ios.yaml
+          dart run flutter_native_splash:create --path=tool/splash_ios.yaml
 
       - name: CocoaPods
         run: cd ios && pod install --repo-update
 
       - name: IPA yig'ish (imzosiz)
-        run: |
-          flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign
 
       - name: IPA arxivlash
         run: |
-          mkdir -p build/ios-payload/Getcontact.app
-          cp -r build/ios/iphoneos/Runner.app build/ios-payload/Getcontact.app/
-          cd build/ios-payload
-          zip -r ../Getcontact.ipa .
+          # IPA — bu ichida "Payload/<Ilova>.app" bo'lgan oddiy zip arxiv.
+          # Papka nomi aynan "Payload" bo'lishi shart, aks holda
+          # Sideloadly / AltStore uni o'rnata olmaydi.
+          rm -rf build/ipa-work
+          mkdir -p build/ipa-work/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ipa-work/Payload/
+          cd build/ipa-work
+          zip -qr ../Getcontact.ipa Payload
+          cd ..
+          ls -lh Getcontact.ipa
           echo "IPA tayyor: build/Getcontact.ipa"
 
       - name: IPA'ni saqlash
