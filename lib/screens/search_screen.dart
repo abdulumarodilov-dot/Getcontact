@@ -34,6 +34,13 @@ class _SearchScreenState extends State<SearchScreen> {
   Timer? _debounce;
   int _seq = 0; // eskirgan natijalarni tashlab yuborish uchun
 
+  // Bazaga so'rovlar ketma-ket bajariladi. Agar oldingisi tugamasdan
+  // yangisi yuborilsa, ular navbatda to'planib qoladi va ilova
+  // qotib qolgandek ko'rinadi. Shuning uchun bir vaqtda faqat bitta
+  // so'rov ishlaydi, keyingisi esa shu tugagach ishga tushadi.
+  bool _busy = false;
+  bool _rerun = false;
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +128,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final minChars = _column == 'abonent' ? kMinCharsName : kMinChars;
     if (q.length < minChars) {
       _seq++;
+      _rerun = false; // kutib turgan qayta qidiruv endi kerak emas
       setState(() {
         _results = [];
         if (DbService.instance.isOpen) {
@@ -138,6 +146,13 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _search() async {
+    // Oldingi so'rov hali tugamagan — uni kutamiz, keyin eng oxirgi
+    // matn bilan bir marta qayta ishga tushamiz.
+    if (_busy) {
+      _rerun = true;
+      return;
+    }
+
     if (!DbService.instance.isOpen) {
       await _openDb();
       if (!mounted) return;
@@ -163,6 +178,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _isError = false;
     });
 
+    _busy = true;
     try {
       final rows = await DbService.instance.search(col, q);
       if (!mounted || seq != _seq) return; // eskirgan natija
@@ -171,10 +187,15 @@ class _SearchScreenState extends State<SearchScreen> {
         _results = rows;
         _isError = false;
         if (rows.isEmpty) {
-          _status = 'Natija topilmadi';
+          // Indeksli bazada ism boshidan qidiriladi — buni aytib qo'yamiz,
+          // aks holda "nega topilmadi?" degan savol tug'iladi.
+          _status = (col == 'abonent' && DbService.instance.isNameIndexed)
+              ? 'Natija topilmadi — familiya/ism boshidan yozing'
+              : 'Natija topilmadi';
+        } else if (rows.length >= kMaxResults) {
+          _status = 'Eng yaqin ${rows.length} ta natija';
         } else {
-          final suffix = rows.length >= kMaxResults ? '+' : '';
-          _status = 'Natijalar: ${rows.length}$suffix ta';
+          _status = 'Natijalar: ${rows.length} ta';
         }
       });
 
@@ -186,6 +207,14 @@ class _SearchScreenState extends State<SearchScreen> {
         _isError = true;
         _results = [];
       });
+    } finally {
+      _busy = false;
+      // So'rov davomida foydalanuvchi matnni o'zgartirgan bo'lsa —
+      // endi eng oxirgi matn bo'yicha qidiramiz.
+      if (_rerun && mounted) {
+        _rerun = false;
+        unawaited(_search());
+      }
     }
   }
 
