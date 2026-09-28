@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:characters/characters.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
@@ -424,67 +423,49 @@ class DbService {
   }
 
   // ──────────────────────────────────────────────────────────
-  // Lotin ↔ Kiril transliteratsiya
-  // ──────────────────────────────────────────────────────────
-
-  /// Lotin harflarini mos kiril harflariga almashtiradi (kichik harf).
-  /// Faqat o'zbek alifbosiga xos harflar ko'rib chiqiladi.
-  static const _latinToCyrillic = <String, String>{
-    "a": "а", "b": "б", "d": "д", "e": "е", "f": "ф",
-    "g": "г", "h": "х", "i": "и", "j": "ж", "k": "к",
-    "l": "л", "m": "м", "n": "н", "o": "о", "p": "п",
-    "q": "қ", "r": "р", "s": "с", "t": "т", "u": "у",
-    "v": "в", "x": "х", "y": "й", "z": "з",
-    // Digraflar (avval tekshiriladi)
-    "sh": "ш", "ch": "ч", "ng": "нг", "gh": "ғ",
-    "o'": "ў", "o`": "ў", "g'": "ғ", "g`": "ғ",
-  };
-
-  static const _cyrillicToLatin = <String, String>{
-    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d",
-    "е": "e", "ё": "yo", "ж": "j", "з": "z", "и": "i",
-    "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
-    "о": "o", "п": "p", "р": "r", "с": "s", "т": "t",
-    "у": "u", "ф": "f", "х": "x", "ц": "ts", "ч": "ch",
-    "ш": "sh", "щ": "sh", "ъ": "", "ы": "i", "ь": "",
-    "э": "e", "ю": "yu", "я": "ya",
-    "ғ": "g'", "қ": "q", "ҳ": "h", "ў": "o'",
-  };
-
-  // ──────────────────────────────────────────────────────────
   // Qidiruv
   // ──────────────────────────────────────────────────────────
 
-  /// Foydalanuvchi `%` yozganmi tekshiradi.
-  /// `%urb%nov` → true (manual wildcard rejimi)
-  static bool _hasWildcard(String q) => q.contains('%') || q.contains('_');
+  /// Matn faqat ASCII belgilardan iboratmi?
+  static bool _isAscii(String s) => s.codeUnits.every((c) => c < 128);
 
-  // ──────────────────────────────────────────────────────────
-  // Tezlashtirish: virtual indeks (bir marta yaratiladi)
-  // ──────────────────────────────────────────────────────────
+  /// LIKE'da qochirish belgisi sifatida `\` ishlatiladi.
+  /// Dart satrida bitta teskari chiziq — '\\'.
+  static const String _bs = '\\';
 
-  bool _indexReady = false;
-
-  /// Bazada `abonent_lc` virtual ustuni va indeks yaratadi.
-  /// Ikkinchi marta chaqirilsa — tezda qaytadi.
-  Future<void> _ensureIndex(Database db) async {
-    if (_indexReady) return;
-    try {
-      // lower() qiymati uchun alohida indeks (SQLite expression index)
-      await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_abonent_lc ON "$kTable" (lower("abonent"))',
-      );
-    } catch (_) {
-      // Ba'zi bazalar read-only mode'da indeks yarata olmaydi — muammo emas
-    }
-    _indexReady = true;
+  /// LIKE uchun pattern. `%` va `_` maxsus belgi emas — oddiy harf.
+  static String _likePattern(String q) {
+    final esc = q
+        .replaceAll(_bs, _bs + _bs)
+        .replaceAll('%', '$_bs%')
+        .replaceAll('_', '${_bs}_');
+    return '%$esc%';
   }
 
-  /// `abonent` ustuni uchun:
-  ///   • `%` bo'lsa — foydalanuvchi o'zi LIKE pattern yozgan,
-  ///     to'g'ridan-to'g'ri shu pattern bilan qidiradi.
-  ///   • `%` bo'lmasa — lotin + kiril variantlari (fuzzy o'chirildi — tez).
-  /// Boshqa ustunlar uchun aniq moslik.
+  /// GLOB uchun pattern: har bir harf `[kichik+KATTA]` sinfiga o'raladi.
+  /// Masalan "Оt" → `*[оО][tT]*`
+  ///
+  /// Bu kerak, chunki SQLite'ning `lower()` va `LIKE` funksiyalari faqat
+  /// ASCII harflarni registrsiz solishtiradi — kirilni bilmaydi.
+  static String _globPattern(String q) {
+    const special = '*?[]^-'; // GLOB maxsus belgilari
+    final b = StringBuffer('*');
+    for (final rune in q.runes) {
+      final ch = String.fromCharCode(rune);
+      if (special.contains(ch)) continue;
+      final lo = ch.toLowerCase();
+      final up = ch.toUpperCase();
+      b.write(lo == up ? '[$lo]' : '[$lo$up]');
+    }
+    b.write('*');
+    return b.toString();
+  }
+
+  /// `abonent` ustuni uchun — faqat kichik/katta harfga e'tibor bermaydigan
+  /// oddiy qidiruv (matn ichidan qism sifatida izlaydi).
+  /// Transliteratsiya, fuzzy va wildcard rejimlari o'chirilgan.
+  ///
+  /// Boshqa ustunlar (telefon, pasport, jshshir) uchun — aniq moslik.
   Future<List<DbRecord>> search(String column, String query) async {
     final db = _db;
     if (db == null) throw StateError('Baza ochilmagan');
@@ -492,61 +473,21 @@ class DbService {
     List<Map<String, Object?>> rows;
 
     if (column == 'abonent') {
-      await _ensureIndex(db);
+      final q = query.trim();
+      if (q.isEmpty) return const [];
 
-      if (_hasWildcard(query)) {
-        // ── Manual wildcard rejimi: %urb%nov ──────────────────
-        rows = await db.rawQuery(
-          'SELECT * FROM "$kTable" WHERE lower("$column") LIKE ? LIMIT $kMaxResults',
-          [query.toLowerCase()],
-        );
-      } else {
-        // ── Avtomatik: lotin + kiril (2 ta pattern, indeks ishlatadi) ──
-        final lower = query.toLowerCase().trim();
+      // Lotin uchun LIKE — SQLite uni ASCII bo'yicha o'zi registrsiz
+      // solishtiradi, bu eng tez yo'l. Kiril uchun esa GLOB kerak.
+      final useLike = _isAscii(q);
+      final sql = useLike
+          ? 'SELECT * FROM "$kTable" WHERE "$column" LIKE ? '
+                "ESCAPE '$_bs' LIMIT $kMaxResults"
+          : 'SELECT * FROM "$kTable" WHERE "$column" GLOB ? LIMIT $kMaxResults';
 
-        // Kiril → Lotin
-        final buf1 = StringBuffer();
-        for (final c in lower.characters) {
-          buf1.write(_cyrillicToLatin[c] ?? c);
-        }
-        final asLatin = buf1.toString();
-
-        // Lotin → Kiril
-        final buf2 = StringBuffer();
-        var j = 0;
-        while (j < lower.length) {
-          bool found = false;
-          for (final len in [3, 2]) {
-            if (j + len <= lower.length) {
-              final sub = lower.substring(j, j + len);
-              if (_latinToCyrillic.containsKey(sub)) {
-                buf2.write(_latinToCyrillic[sub]);
-                j += len;
-                found = true;
-                break;
-              }
-            }
-          }
-          if (!found) {
-            buf2.write(_latinToCyrillic[lower[j]] ?? lower[j]);
-            j++;
-          }
-        }
-        final asCyrillic = buf2.toString();
-
-        // Noyob patternlar (takror bo'lsa — bitta so'rov)
-        final patterns = <String>{
-          '%$lower%',
-          '%$asLatin%',
-          '%$asCyrillic%',
-        }.toList();
-
-        final conditions =
-            patterns.map((_) => 'lower("$column") LIKE ?').toList();
-        final sql =
-            'SELECT * FROM "$kTable" WHERE ${conditions.join(' OR ')} LIMIT $kMaxResults';
-        rows = await db.rawQuery(sql, patterns);
-      }
+      rows = await db.rawQuery(
+        sql,
+        [useLike ? _likePattern(q) : _globPattern(q)],
+      );
     } else {
       // Telefon, pasport, jshshir — aniq moslik
       rows = await db.rawQuery(
