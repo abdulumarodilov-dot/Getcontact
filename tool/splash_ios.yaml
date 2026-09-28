@@ -1,0 +1,11 @@
+# iOS yuklash ekrani uchun alohida konfiguratsiya.
+# Ishlatish: dart run flutter_native_splash:create --path=tool/splash_ios.yaml
+#
+# pubspec.yaml da "ios: false" — chunki Android runner'da ios/ papkasi yo'q.
+# Bu yerda esa aksincha: faqat iOS.
+
+flutter_native_splash:
+  color: "#05193F"
+  image: "assets/splash_logo.png"
+  android: false
+  ios: true
