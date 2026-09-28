@@ -6,29 +6,41 @@ MANIFEST="android/app/src/main/AndroidManifest.xml"
 GRADLE_KTS="android/app/build.gradle.kts"
 GRADLE="android/app/build.gradle"
 
-echo "→ AndroidManifest.xml ga ruxsatlar qo'shilmoqda"
+echo "→ AndroidManifest.xml yangilanmoqda (ruxsatlar + icon + label)"
 python3 - "$MANIFEST" <<'PY'
 import re, sys
 path = sys.argv[1]
 src = open(path, encoding='utf-8').read()
 
+# 1) Ruxsatlar
 perms = '''    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 '''
-
 if 'MANAGE_EXTERNAL_STORAGE' not in src:
-    # <manifest ...> tegi yopilgandan keyin qo'shamiz
     i = src.index('>', src.index('<manifest')) + 1
     src = src[:i] + '\n' + perms + src[i:]
+    print('   Ruxsatlar qo\'shildi')
 
-# Ilova nomi
+# 2) Ilova nomi
 src = re.sub(r'android:label="[^"]*"', 'android:label="Getcontact"', src, count=1)
 
-# Tashqi xotiraga eski uslubda kirish (Android 10 uchun)
+# 3) <application tegiga barcha atributlarni birdan qo'shamiz
+# (requestLegacyExternalStorage + icon + roundIcon)
+app_tag = '<application'
+extra_attrs = ''
+if 'android:icon="@mipmap/ic_launcher"' not in src:
+    extra_attrs += '\n        android:icon="@mipmap/ic_launcher"'
+    extra_attrs += '\n        android:roundIcon="@mipmap/ic_launcher_round"'
 if 'requestLegacyExternalStorage' not in src:
-    src = src.replace('<application', '<application\n        android:requestLegacyExternalStorage="true"', 1)
+    extra_attrs += '\n        android:requestLegacyExternalStorage="true"'
+
+if extra_attrs:
+    src = src.replace(app_tag, app_tag + extra_attrs, 1)
+    print(f'   application atributlari qo\'shildi:{extra_attrs}')
+else:
+    print('   application atributlari allaqachon mavjud')
 
 open(path, 'w', encoding='utf-8').write(src)
 print('   AndroidManifest.xml yangilandi')
