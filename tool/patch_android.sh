@@ -17,6 +17,8 @@ perms = '''    <uses-permission android:name="android.permission.READ_EXTERNAL_S
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />     ← YANGI
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />   ← YANGI
 '''
 if 'MANAGE_EXTERNAL_STORAGE' not in src:
     i = src.index('>', src.index('<manifest')) + 1
@@ -77,7 +79,8 @@ cat > android/app/proguard-rules.pro <<'EOF'
 -dontwarn com.google.crypto.tink.**
 EOF
 echo "   proguard-rules.pro yaratildi"
-
+# local_auth — biometric authentication
+-keep class io.flutter.embedding.engine.plugins.shim.** { *; }
 python3 - "$GRADLE_KTS" "$GRADLE" <<'PY'
 import os, re, sys
 
