@@ -34,6 +34,12 @@ jobs:
           dart run flutter_launcher_icons -f tool/icons_ios.yaml
           dart run flutter_native_splash:create --path=tool/splash_ios.yaml
 
+      # Podfile ba'zi Flutter versiyalarida faqat "pub get" dan keyin
+      # paydo bo'ladi, shuning uchun skriptni qayta chaqiramiz (idempotent):
+      # local_auth iOS 13+ talab qiladi.
+      - name: iOS minimal versiyasini tasdiqlash
+        run: bash tool/patch_ios.sh
+
       - name: CocoaPods
         run: cd ios && pod install --repo-update
 
