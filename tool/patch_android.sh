@@ -17,8 +17,8 @@ perms = '''    <uses-permission android:name="android.permission.READ_EXTERNAL_S
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.USE_BIOMETRIC" />     ← YANGI
-    <uses-permission android:name="android.permission.USE_FINGERPRINT" />   ← YANGI
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 '''
 if 'MANAGE_EXTERNAL_STORAGE' not in src:
     i = src.index('>', src.index('<manifest')) + 1
@@ -46,6 +46,32 @@ else:
 
 open(path, 'w', encoding='utf-8').write(src)
 print('   AndroidManifest.xml yangilandi')
+PY
+
+echo "→ MainActivity FlutterFragmentActivity'ga o'tkazilmoqda"
+# local_auth (barmoq izi / Face ID) androidx.biometric'ni ishlatadi, u esa
+# FragmentActivity talab qiladi. flutter create oddiy FlutterActivity yasaydi —
+# o'zgartirmasak biometrika "no_fragment_activity" xatosi bilan ishlamaydi.
+python3 - <<'PY'
+import glob, re, sys
+
+files = glob.glob('android/app/src/main/kotlin/**/MainActivity.kt', recursive=True)
+files += glob.glob('android/app/src/main/java/**/MainActivity.java', recursive=True)
+if not files:
+    print('   MainActivity topilmadi — o\'tkazib yuborildi')
+    sys.exit(0)
+
+for path in files:
+    src = open(path, encoding='utf-8').read()
+    if 'FlutterFragmentActivity' in src:
+        print(f'   {path}: allaqachon FlutterFragmentActivity')
+        continue
+    # Import va sinf e'lonida nomni almashtiramiz
+    src = src.replace('io.flutter.embedding.android.FlutterActivity',
+                      'io.flutter.embedding.android.FlutterFragmentActivity')
+    src = re.sub(r'\bFlutterActivity\b', 'FlutterFragmentActivity', src)
+    open(path, 'w', encoding='utf-8').write(src)
+    print(f'   {path}: FlutterFragmentActivity qilindi')
 PY
 
 echo "→ minSdk sozlanmoqda"
@@ -77,10 +103,12 @@ cat > android/app/proguard-rules.pro <<'EOF'
 # flutter_secure_storage v11 — Google Tink
 -keep class com.google.crypto.tink.** { *; }
 -dontwarn com.google.crypto.tink.**
-EOF
-echo "   proguard-rules.pro yaratildi"
+
 # local_auth — biometric authentication
 -keep class io.flutter.embedding.engine.plugins.shim.** { *; }
+EOF
+echo "   proguard-rules.pro yaratildi"
+
 python3 - "$GRADLE_KTS" "$GRADLE" <<'PY'
 import os, re, sys
 
