@@ -60,13 +60,15 @@ class BiometricService {
   ///
   /// `biometricOnly: true` — qurilma PIN kodi taklif qilinmaydi, chunki
   /// ilovaning o'z paroli allaqachon zaxira yo'l sifatida turadi.
-  /// Boshqa parametrlar (`stickyAuth` va h.k.) ataylab berilmagan:
-  /// local_auth versiyalari orasida ularning nomi o'zgargan.
+  ///
+  /// DIQQAT: local_auth 3.x da parametrlar to'g'ridan-to'g'ri beriladi.
+  /// 2.x dagi `options: AuthenticationOptions(...)` ko'rinishi endi yo'q —
+  /// uni ishlatsa "No named parameter with the name 'options'" xatosi chiqadi.
   Future<BioResult> authenticate(String reason) async {
     try {
       final ok = await _auth.authenticate(
         localizedReason: reason,
-        options: const AuthenticationOptions(biometricOnly: true),
+        biometricOnly: true,
       );
       debugPrint('Biometrika natijasi: $ok');
       // ok == false — foydalanuvchi bekor qildi, bu xato emas
