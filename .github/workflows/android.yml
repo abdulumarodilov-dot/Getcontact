@@ -24,7 +24,7 @@ jobs:
           cache: true
 
       - name: Platforma papkalarini yaratish
-        run: flutter create --platforms=android .
+        run: flutter create --platforms=android --project-name=getcontact .
 
       - name: Android sozlamalarini qo'llash
         run: bash tool/patch_android.sh
@@ -32,10 +32,28 @@ jobs:
       - name: Paketlar
         run: flutter pub get
 
+      - name: Android tuzilmasini tekshirish
+        run: |
+          echo "=== AndroidManifest.xml holati ==="
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            echo "✅ Manifest mavjud: $MANIFEST"
+            grep -n 'android:icon\|android:label\|package' "$MANIFEST" | head -10
+          else
+            echo "❌ Manifest topilmadi! android/ papkasi:"
+            find android -type f 2>/dev/null | head -20
+            exit 1
+          fi
+
       - name: Ikonka va yuklash ekrani
         run: |
           dart run flutter_launcher_icons
           dart run flutter_native_splash:create
+
+      # DIQQAT: splash styles.xml ni qaytadan yozadi, shuning uchun mavzu
+      # tuzatishi aynan shu qadamdan KEYIN turishi kerak (biometrika uchun).
+      - name: Mavzuni AppCompat'ga o'tkazish
+        run: bash tool/patch_android_theme.sh
 
       - name: APK yig'ish
         run: flutter build apk --release
