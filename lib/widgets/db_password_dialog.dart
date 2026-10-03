@@ -1,67 +1,149 @@
-name: iOS IPA
+import 'package:flutter/material.dart';
+import '../theme.dart';
+import 'common.dart';
 
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
+/// Baza parolini so'raydigan oyna.
+/// Bekor qilinsa `null`, aks holda kiritilgan parol qaytadi
+/// (bo'sh satr = shifrlanmagan baza).
+///
+/// DIQQAT: bu oynaga Face ID / barmoq izi qo'yish ma'nosiz. Oyna faqat
+/// saqlangan kalit YO'Q yoki NOTO'G'RI bo'lganda chiqadi — `DbService.open()`
+/// saqlangan kalitni o'zi sinab ko'rgan bo'ladi. Biometrika bera oladigan
+/// yangi kalit yo'q. Biometrika ilova qulfida (LockScreen) ishlaydi.
+Future<String?> askDbPassword(
+  BuildContext context, {
+  String title = 'Baza paroli',
+  String? message,
+  bool allowEmpty = false,
+}) {
+  return showDialog<String>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => _DbPasswordDialog(
+      title: title,
+      message: message,
+      allowEmpty: allowEmpty,
+    ),
+  );
+}
 
-jobs:
-  build:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
+class _DbPasswordDialog extends StatefulWidget {
+  final String title;
+  final String? message;
+  final bool allowEmpty;
 
-      - name: Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
+  const _DbPasswordDialog({
+    required this.title,
+    this.message,
+    required this.allowEmpty,
+  });
 
-      - name: Platforma papkalarini yaratish
-        run: flutter create --platforms=ios --project-name=getcontact .
+  @override
+  State<_DbPasswordDialog> createState() => _DbPasswordDialogState();
+}
 
-      - name: iOS sozlamalarini qo'llash
-        run: bash tool/patch_ios.sh
+class _DbPasswordDialogState extends State<_DbPasswordDialog> {
+  final _ctrl = TextEditingController();
+  String _err = '';
 
-      - name: Paketlar
-        run: flutter pub get
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
-      # DIQQAT: pubspec.yaml dagi konfiguratsiya Android uchun mo'ljallangan.
-      # Bu runner'da android/ papkasi yo'q, shuning uchun iOS'ning
-      # o'z konfiguratsiya fayllarini ishlatamiz (-f / --path).
-      - name: Ikonka va yuklash ekrani (faqat iOS)
-        run: |
-          dart run flutter_launcher_icons -f tool/icons_ios.yaml
-          dart run flutter_native_splash:create --path=tool/splash_ios.yaml
+  void _submit() {
+    final v = _ctrl.text;
+    if (v.isEmpty && !widget.allowEmpty) {
+      setState(() => _err = "Parol bo'sh bo'lmasin");
+      return;
+    }
+    Navigator.pop(context, v);
+  }
 
-      # Podfile ba'zi Flutter versiyalarida faqat "pub get" dan keyin
-      # paydo bo'ladi, shuning uchun skriptni qayta chaqiramiz (idempotent):
-      # local_auth iOS 13+ talab qiladi.
-      - name: iOS minimal versiyasini tasdiqlash
-        run: bash tool/patch_ios.sh
-
-      - name: CocoaPods
-        run: cd ios && pod install --repo-update
-
-      - name: IPA yig'ish (imzosiz)
-        run: flutter build ios --release --no-codesign
-
-      - name: IPA arxivlash
-        run: |
-          # IPA — bu ichida "Payload/<Ilova>.app" bo'lgan oddiy zip arxiv.
-          # Papka nomi aynan "Payload" bo'lishi shart, aks holda
-          # Sideloadly / AltStore uni o'rnata olmaydi.
-          rm -rf build/ipa-work
-          mkdir -p build/ipa-work/Payload
-          cp -r build/ios/iphoneos/Runner.app build/ipa-work/Payload/
-          cd build/ipa-work
-          zip -qr ../Getcontact.ipa Payload
-          cd ..
-          ls -lh Getcontact.ipa
-          echo "IPA tayyor: build/Getcontact.ipa"
-
-      - name: IPA'ni saqlash
-        uses: actions/upload-artifact@v4
-        with:
-          name: getcontact-ipa
-          path: build/Getcontact.ipa
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+        decoration: BoxDecoration(
+          color: AppColors.cardBg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF1F529E), width: 1.2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.lock_outline,
+                    size: 22, color: AppColors.accent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    widget.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (widget.message != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                widget.message!,
+                style: const TextStyle(
+                  color: AppColors.labelBlue,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            DarkInput(
+              controller: _ctrl,
+              hint: widget.allowEmpty
+                  ? "Parol (shifrlanmagan bo'lsa — bo'sh)"
+                  : 'Baza paroli',
+              obscure: true,
+              action: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+            ),
+            if (_err.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                _err,
+                style: const TextStyle(color: AppColors.error, fontSize: 13),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: GhostBtn(
+                    text: 'Bekor',
+                    onTap: () => Navigator.pop(context, null),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: PrimaryBtn(
+                    text: 'Ochish',
+                    height: 50,
+                    onTap: _submit,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
