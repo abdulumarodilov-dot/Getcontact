@@ -32,8 +32,8 @@ dependencies:
   # Baza kalitini Keystore/Keychain'da saqlash
   flutter_secure_storage: ^11.2.0
 
-  # Biometric authentication (Face ID / Touch ID, fingerprint)
-  local_auth: ^2.2.0
+  # Face ID / Touch ID / barmoq izi
+  local_auth: ^3.0.2
 
 dev_dependencies:
   flutter_lints: ^3.0.0
