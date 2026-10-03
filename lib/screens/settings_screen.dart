@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../services/auth_service.dart';
+import '../services/biometric_service.dart';
 import '../services/db_service.dart';
 import '../widgets/common.dart';
 import '../widgets/db_password_dialog.dart';
@@ -26,10 +27,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _importing = false;
   bool _hasKey = false;
 
+  bool _bioAvailable = false;
+  bool _bioOn = false;
+  String _bioLabel = 'Biometrika';
+
   @override
   void initState() {
     super.initState();
     _refreshDbStatus();
+    _refreshBio();
+  }
+
+  Future<void> _refreshBio() async {
+    final avail = await BiometricService.instance.isAvailable();
+    final on = await AuthService.instance.isBiometricEnabled();
+    final label = avail ? await BiometricService.instance.label() : '';
+    if (!mounted) return;
+    setState(() {
+      _bioAvailable = avail;
+      _bioOn = on;
+      if (label.isNotEmpty) _bioLabel = label;
+    });
+  }
+
+  Future<void> _toggleBio(bool on) async {
+    if (!on) {
+      await AuthService.instance.setBiometricEnabled(false);
+      if (!mounted) return;
+      setState(() => _bioOn = false);
+      return;
+    }
+
+    // Yoqishdan oldin haqiqatan ishlashini tekshiramiz
+    final res = await BiometricService.instance
+        .authenticate("$_bioLabel ni yoqish uchun tasdiqlang");
+    if (!mounted) return;
+
+    if (res.ok) {
+      await AuthService.instance.setBiometricEnabled(true);
+      if (!mounted) return;
+      setState(() => _bioOn = true);
+    } else if (res.message != null) {
+      setState(() {
+        _pmsg = res.message!;
+        _pmsgError = true;
+      });
+    }
   }
 
   @override
@@ -301,6 +344,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                       const SizedBox(height: 14),
+
+                      // ── Biometrika ────────────────────────
+                      if (_bioAvailable) ...[
+                        Panel(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '$_bioLabel bilan kirish',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                // Rang berilmagan — Material 3 switch'i
+                                // colorScheme.primary (accent) ni oladi,
+                                // activeColor esa yangi Flutter'da eskirgan.
+                                Switch(
+                                  value: _bioOn,
+                                  onChanged: _toggleBio,
+                                ),
+                              ],
+                            ),
+                            Text(
+                              _bioOn
+                                  ? "Ilova ochilganda $_bioLabel so'raladi. "
+                                      "Parol zaxira yo'l sifatida qoladi."
+                                  : "Yoqilsa, ilovaga parol yozmasdan "
+                                      "$_bioLabel bilan kirasiz.",
+                              style: const TextStyle(
+                                color: AppColors.labelBlue,
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                      ],
 
                       // ── Parol ─────────────────────────────
                       Panel(
