@@ -43,8 +43,33 @@ jobs:
       - name: CocoaPods
         run: cd ios && pod install --repo-update
 
+      # DIQQAT: Flutter muvaffaqiyatsiz build'da ko'pincha "Development Team
+      # kerak" degan CHALG'ITUVCHI xabarni ko'rsatadi — haqiqiy Xcode xatosi
+      # oddiy chiqishda butunlay yashiriladi (flutter/flutter#113203).
+      # Shuning uchun -v bilan yig'amiz va xato bo'lsa asl sababni ajratamiz.
       - name: IPA yig'ish (imzosiz)
-        run: flutter build ios --release --no-codesign
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign -v 2>&1 \
+            | tee ios-build.log && ok=1 || ok=0
+
+          if [ "$ok" = "0" ]; then
+            echo "═════════════ HAQIQIY XATO ═════════════"
+            grep -nE "error:|fatal error|No such module|Undefined symbol|minimum deployment target|BUILD FAILED|The following build commands failed" \
+              ios-build.log | tail -60 || echo "(aniq xato qatori topilmadi)"
+            echo "═════════════ oxirgi 100 qator ═════════════"
+            tail -100 ios-build.log
+            exit 1
+          fi
+
+      # Xato bo'lsa to'liq log kerak bo'ladi — har holda saqlab qo'yamiz
+      - name: Build logini saqlash
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios-build.log
+          if-no-files-found: ignore
 
       - name: IPA arxivlash
         run: |
