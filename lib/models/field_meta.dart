@@ -58,6 +58,54 @@ FieldInfo fieldMeta(String key) {
   return FieldInfo(pretty, Icons.description_outlined);
 }
 
+// ──────────────────────────────────────────────────────────
+// Maydon ustiga bosilganda nima bo'ladi
+// ──────────────────────────────────────────────────────────
+
+enum FieldActionKind {
+  /// Hech narsa — oddiy matn
+  none,
+
+  /// Telefon raqami — qo'ng'iroq / SMS
+  call,
+
+  /// Bu qiymat bo'yicha bazadan qayta qidirish
+  search,
+}
+
+class FieldAction {
+  final FieldActionKind kind;
+
+  /// `search` uchun — qaysi ustundan qidiriladi.
+  /// Faqat `searchColumns` dagi kalitlar bo'lishi mumkin.
+  final String? column;
+
+  const FieldAction(this.kind, [this.column]);
+
+  static const none = FieldAction(FieldActionKind.none);
+}
+
+/// Ustun nomiga qarab bosish harakatini aniqlaydi.
+///
+/// Masalan `pinfl` ustuni ham JShShIR hisoblanadi va uning ustiga
+/// bosilganda `jshshir` ustunidan qidiriladi.
+FieldAction fieldAction(String key) {
+  final k = key.trim().toLowerCase().replaceAll("'", '');
+
+  if (k.startsWith('telefon') || k.startsWith('tel')) {
+    return const FieldAction(FieldActionKind.call);
+  }
+  if (k.startsWith('jshshir') || k.startsWith('pinfl')) {
+    return const FieldAction(FieldActionKind.search, 'jshshir');
+  }
+  // DIQQAT: "pasport_bergan_organ" kabi ustunlar pasport RAQAMI emas —
+  // ular bo'yicha qidirish ma'nosiz, shuning uchun chetlab o'tamiz.
+  if (k == 'pasport' || k == 'seriya' || k.startsWith('pasport_raqam')) {
+    return const FieldAction(FieldActionKind.search, 'pasport');
+  }
+  return FieldAction.none;
+}
+
 /// Qidiruv ustunlari
 class SearchColumn {
   final String key;
@@ -68,8 +116,8 @@ class SearchColumn {
 }
 
 const List<SearchColumn> searchColumns = [
-  SearchColumn('telefon', 'Telefon', '921929884', Icons.phone_outlined),
-  SearchColumn('abonent', 'Abonent', 'F.I.SH.', Icons.person_outline),
+  SearchColumn('telefon', 'Telefon', '998901234567', Icons.phone_outlined),
+  SearchColumn('abonent', 'Abonent', 'Ali Valiyev  •  %urb%nov', Icons.person_outline),
   SearchColumn('pasport', 'Pasport', 'AA1234567', Icons.description_outlined),
-  SearchColumn('jshshir', 'JShShIR', '32345678901234', Icons.storage_outlined),
+  SearchColumn('jshshir', 'JShShIR', '12345678901234', Icons.storage_outlined),
 ];
