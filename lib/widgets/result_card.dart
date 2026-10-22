@@ -270,7 +270,7 @@ class _PhoneSheet extends StatelessWidget {
             _SheetAction(
               icon: Icons.call,
               text: "Qo'ng'iroq qilish",
-              onTap: () => _run(context, ContactActions.call),
+              onTap: () => _run(context, ContactActions.dial),
             ),
             _SheetAction(
               icon: Icons.sms_outlined,
