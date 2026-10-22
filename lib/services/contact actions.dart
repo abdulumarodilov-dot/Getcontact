@@ -25,7 +25,7 @@ class ContactActions {
   }
 
   /// Telefon ilovasini raqam terilgan holda ochadi
-  static Future<String?> call(String raw) => _open('tel', raw);
+  static Future<String?> dial(String raw) => _open('tel', raw);
 
   /// SMS ilovasini raqam qo'yilgan holda ochadi
   static Future<String?> sms(String raw) => _open('sms', raw);
