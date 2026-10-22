@@ -58,8 +58,30 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
-  SearchColumn get _col =>
-      searchColumns.firstWhere((c) => c.key == _column);
+  // orElse — noma'lum ustun kelib qolsa ilova yiqilmasligi uchun
+  SearchColumn get _col => searchColumns.firstWhere(
+        (c) => c.key == _column,
+        orElse: () => searchColumns.first,
+      );
+
+  /// Natijadagi JShShIR yoki Pasport ustiga bosilganda — shu qiymat
+  /// bo'yicha yangi qidiruv. Shu odamga rasmiylashtirilgan boshqa
+  /// yozuvlarni topish uchun.
+  void _searchFor(String column, String value) {
+    final v = value.trim();
+    if (v.isEmpty) return;
+
+    setState(() => _column = column);
+
+    // Matnni qo'yish listener'ni uyg'otadi va u debounce taymer qo'yadi —
+    // uni bekor qilib, qidiruvni darhol o'zimiz boshlaymiz.
+    _query.text = v;
+    _query.selection = TextSelection.collapsed(offset: v.length);
+    _debounce?.cancel();
+
+    _focus.unfocus(); // klaviatura natijalarni to'sib qolmasin
+    _search();
+  }
 
   Future<void> _openDb({bool promptForKey = true}) async {
     if (DbService.instance.isOpen) return;
@@ -380,7 +402,10 @@ class _SearchScreenState extends State<SearchScreen> {
                     controller: _scroll,
                     padding: const EdgeInsets.only(bottom: 10),
                     itemCount: _results.length,
-                    itemBuilder: (_, i) => ResultCard(record: _results[i]),
+                    itemBuilder: (_, i) => ResultCard(
+                      record: _results[i],
+                      onSearch: _searchFor,
+                    ),
                   ),
                 ),
               ],
