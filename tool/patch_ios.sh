@@ -35,6 +35,11 @@ pl['NSFaceIDUsageDescription'] = \
     'Ilovaga parol yozmasdan tez va xavfsiz kirish uchun'
 pl.pop('NSTouchIDUsageDescription', None)  # eski noto'g'ri kalit
 
+# url_launcher: busiz canLaunchUrl("tel:...") iOS'da har doim false qaytaradi
+schemes = set(pl.get('LSApplicationQueriesSchemes') or [])
+schemes.update(['tel', 'sms'])
+pl['LSApplicationQueriesSchemes'] = sorted(schemes)
+
 with open(path, 'wb') as f:
     plistlib.dump(pl, f)
 
