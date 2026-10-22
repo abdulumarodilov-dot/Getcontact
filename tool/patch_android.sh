@@ -25,6 +25,35 @@ if 'MANAGE_EXTERNAL_STORAGE' not in src:
     src = src[:i] + '\n' + perms + src[i:]
     print('   Ruxsatlar qo\'shildi')
 
+# 1b) Android 11+ paket ko'rinishi.
+# Busiz url_launcher tel:/sms: ilovasini "yo'q" deb hisoblaydi va
+# qo'ng'iroq tugmasi jim turib qoladi.
+# DIQQAT: flutter create yangi versiyalarda <queries> blokini o'zi qo'shadi
+# (PROCESS_TEXT uchun). Shuning uchun blok bor-yo'qligini emas, aynan
+# tel sxemasi bor-yo'qligini tekshiramiz va mavjud blok ichiga qo'shamiz.
+intents = '''        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tel" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="sms" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+'''
+if 'android:scheme="tel"' in src:
+    print('   <queries>: tel/sms allaqachon bor')
+elif '<queries>' in src:
+    i = src.index('<queries>') + len('<queries>')
+    src = src[:i] + '\n' + intents + src[i:]
+    print('   mavjud <queries> ichiga tel/sms qo\'shildi')
+else:
+    i = src.index('>', src.index('<manifest')) + 1
+    src = src[:i] + '\n    <queries>\n' + intents + '    </queries>\n' + src[i:]
+    print('   yangi <queries> (tel/sms) qo\'shildi')
+
 # 2) Ilova nomi
 src = re.sub(r'android:label="[^"]*"', 'android:label="Getcontact"', src, count=1)
 
