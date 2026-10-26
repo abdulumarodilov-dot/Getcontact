@@ -6,9 +6,18 @@ import 'screens/lock_screen.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Barcha yo'nalishlar — telefon yon tomonga burilsa ham ishlaydi.
+  // Avval faqat portret ruxsat etilgan edi, shuning uchun ekran
+  // burilmay turardi.
+  //
+  // DIQQAT: iOS'da bu ro'yxat Info.plist dagi
+  // UISupportedInterfaceOrientations dan kengroq bo'la olmaydi —
+  // u yerda ham landshaft ochilishi kerak (tool/patch_ios.sh).
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
   ]);
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
