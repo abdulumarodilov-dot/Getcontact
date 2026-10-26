@@ -20,9 +20,11 @@ pl['CFBundleName'] = 'Getcontact'
 pl['UIFileSharingEnabled'] = True                 # iTunes/Finder orqali
 pl['LSSupportsOpeningDocumentsInPlace'] = True    # Files ilovasida ko'rinadi
 
-# Faqat portret
+# Faqat portret va landshaft
 pl['UISupportedInterfaceOrientations'] = [
     'UIInterfaceOrientationPortrait',
+    'UIInterfaceOrientationLandscapeLeft',
+    'UIInterfaceOrientationLandscapeRight',
 ]
 
 # Qorong'i status bar
