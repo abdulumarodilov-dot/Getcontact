@@ -42,6 +42,21 @@ schemes = set(pl.get('LSApplicationQueriesSchemes') or [])
 schemes.update(['tel', 'sms'])
 pl['LSApplicationQueriesSchemes'] = sorted(schemes)
 
+# Action Button / Shortcuts: getcontact://search?q=...
+# Sxemani ro'yxatdan o'tkazamiz (takror qo'shmasdan — skript ikki marta ishlaydi)
+url_types = pl.get('CFBundleURLTypes') or []
+if not any('getcontact' in (t.get('CFBundleURLSchemes') or []) for t in url_types):
+    url_types.append({
+        'CFBundleURLName': 'uz.getcontact.search',
+        'CFBundleURLSchemes': ['getcontact'],
+    })
+pl['CFBundleURLTypes'] = url_types
+
+# Havolalarni app_links paketi qabul qiladi. Flutter'ning o'z deep link
+# tizimi yoqilgan bo'lsa, havolani navigatorga "/search?q=..." marshruti
+# sifatida yuboradi va ilova noma'lum sahifani ochishga urinadi.
+pl['FlutterDeepLinkingEnabled'] = False
+
 with open(path, 'wb') as f:
     plistlib.dump(pl, f)
 

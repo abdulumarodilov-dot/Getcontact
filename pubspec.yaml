@@ -38,6 +38,9 @@ dependencies:
   # Qo'ng'iroq (tel:) va SMS (sms:) ilovalarini ochish
   url_launcher: ^6.3.3
 
+  # Action Button / Shortcuts: getcontact://search?q=... havolalarini qabul qilish
+  app_links: ^6.3.0
+
 dev_dependencies:
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.13.1

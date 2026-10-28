@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../models/field_meta.dart';
 import '../services/db_service.dart';
+import '../services/quick_search_link.dart';
 import '../widgets/common.dart';
 import '../widgets/db_password_dialog.dart';
 import '../widgets/result_card.dart';
@@ -46,11 +47,17 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _query.addListener(_onQueryChanged);
     _focus.addListener(() => setState(() {}));
-    WidgetsBinding.instance.addPostFrameCallback((_) => _openDb());
+    QuickSearchLink.instance.pending.addListener(_onQuickSearch);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _openDb();
+      // Ilova Action Button orqali ochilgan bo'lsa — so'rov kutib turibdi
+      _onQuickSearch();
+    });
   }
 
   @override
   void dispose() {
+    QuickSearchLink.instance.pending.removeListener(_onQuickSearch);
     _debounce?.cancel();
     _query.dispose();
     _focus.dispose();
@@ -81,6 +88,46 @@ class _SearchScreenState extends State<SearchScreen> {
 
     _focus.unfocus(); // klaviatura natijalarni to'sib qolmasin
     _search();
+  }
+
+  /// Action Button / Shortcuts orqali kelgan so'rov
+  /// (getcontact://search?q=...). Ekran ochiq turganda ham, endigina
+  /// ochilganda ham chaqiriladi.
+  void _onQuickSearch() {
+    if (!mounted) return;
+    final req = QuickSearchLink.instance.take();
+    if (req == null) return;
+
+    // Sozlamalar ochiq bo'lsa — natijalar ko'rinishi uchun qidiruvga qaytamiz
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    unawaited(_runQuickSearch(req));
+  }
+
+  /// Qiymat ko'rinishlarini navbat bilan sinaydi (masalan telefon uchun
+  /// "901234567", keyin "998901234567") — birinchi natijada to'xtaydi.
+  Future<void> _runQuickSearch(QuickSearchRequest req) async {
+    for (final value in req.values) {
+      // Oldingi so'rov tugashini kutamiz, aks holda _search() navbatga
+      // qo'yib darhol qaytadi va natijani ko'ra olmaymiz.
+      while (_busy) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (!mounted) return;
+      }
+
+      setState(() => _column = req.column);
+      _query.text = value;
+      _query.selection = TextSelection.collapsed(offset: value.length);
+      _debounce?.cancel(); // listener qo'ygan taymerni bekor qilamiz
+      _focus.unfocus();
+
+      await _search();
+      if (!mounted) return;
+
+      // Baza ochilmadi / parol kerak / xato — keyingi ko'rinishni
+      // sinashdan foyda yo'q
+      if (!DbService.instance.isOpen || _isError) return;
+      if (_results.isNotEmpty) return;
+    }
   }
 
   Future<void> _openDb({bool promptForKey = true}) async {

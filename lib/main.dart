@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'theme.dart';
 import 'screens/lock_screen.dart';
+import 'services/quick_search_link.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,10 @@ void main() {
     statusBarIconBrightness: Brightness.light,
     statusBarBrightness: Brightness.dark,
   ));
+
+  // Action Button / Shortcuts: getcontact://search?q=... havolalari.
+  // So'rov qidiruv ekrani ochilganda (qulf ochilgandan keyin) bajariladi.
+  QuickSearchLink.instance.init();
 
   runApp(const GetcontactApp());
 }

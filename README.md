@@ -178,3 +178,23 @@ lib/
 **Qidiruv ustunlari:** `lib/models/field_meta.dart` → `searchColumns`
 
 **Jadval nomi / limit:** `lib/services/db_service.dart` → `kTable`, `kMaxResults`
+
+---
+
+## iPhone: Action Button orqali tezkor qidiruv
+
+Ilova `getcontact://search?q=...` havolasini qabul qiladi. Qidiruv qulf
+(Face ID / parol) ochilgandan keyin bajariladi. Matnga qarab ustun o'zi
+aniqlanadi: telefon (`+998 90 123-45-67`, `90 123 45 67`), JShShIR
+(14 raqam), pasport (`AA1234567`) yoki F.I.Sh.
+
+**Shortcut** («Команды» ilovasi), 3 ta amal:
+
+1. **Запросить ввод** — Текст, «Ответ по умолчанию»: *Буфер обмена*
+2. **Кодировать URL** — 1-amal natijasi
+3. **Открыть URL-адреса** — `getcontact://search?q=` + 2-amal natijasi
+
+Keyin: **Настройки → Кнопка действия → Команда** → shu buyruq.
+
+Foydalanish: *Недавние* → (i) → raqamni bosib turib **Скопировать** →
+yon tugmani bosib turing → **Готово**.
