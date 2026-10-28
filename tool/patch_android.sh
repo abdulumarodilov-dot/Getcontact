@@ -19,6 +19,7 @@ perms = '''    <uses-permission android:name="android.permission.READ_EXTERNAL_S
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 '''
 if 'MANAGE_EXTERNAL_STORAGE' not in src:
     i = src.index('>', src.index('<manifest')) + 1
@@ -101,6 +102,70 @@ for path in files:
     src = re.sub(r'\bFlutterActivity\b', 'FlutterFragmentActivity', src)
     open(path, 'w', encoding='utf-8').write(src)
     print(f'   {path}: FlutterFragmentActivity qilindi')
+PY
+
+echo "→ Qo'ng'iroq identifikatori (Kotlin) o'rnatilmoqda"
+# MainActivity.kt tool/android/ dagi andoza bilan to'liq almashtiriladi.
+# Andoza ichida MainActivity, CallerIdService va oyna kodi birga turadi.
+# Andoza topilmasa — yuqoridagi qadam MainActivity'ni FlutterFragmentActivity
+# qilib qo'ygan bo'ladi, ya'ni biometrika baribir ishlaydi, faqat
+# qo'ng'iroq oynasi bo'lmaydi.
+python3 - <<'PY'
+import glob, os, sys
+
+TPL = 'tool/android/MainActivity.kt'
+if not os.path.exists(TPL):
+    print(f'   {TPL} topilmadi — qo\'ng\'iroq qismi o\'tkazib yuborildi')
+    sys.exit(0)
+
+mains = glob.glob('android/app/src/main/kotlin/**/MainActivity.kt', recursive=True)
+if not mains:
+    print('   MainActivity.kt topilmadi — o\'tkazib yuborildi')
+    sys.exit(0)
+
+main_path = mains[0]
+pkg_dir = os.path.dirname(main_path)
+
+# Paket nomini aynan mavjud fayldan olamiz — u build.gradle dagi
+# namespace bilan mos bo'lishi shart, taxmin qilib bo'lmaydi.
+pkg = None
+for line in open(main_path, encoding='utf-8'):
+    s = line.strip()
+    if s.startswith('package '):
+        pkg = s[len('package '):].strip().rstrip(';')
+        break
+
+if not pkg:
+    print('   package qatori topilmadi — o\'tkazib yuborildi')
+    sys.exit(0)
+print(f'   paket: {pkg}')
+
+tpl = open(TPL, encoding='utf-8').read()
+open(main_path, 'w', encoding='utf-8').write(tpl.replace('__PACKAGE__', pkg))
+print(f'   {main_path} andoza bilan almashtirildi')
+
+# Manifestga xizmatni qo'shamiz.
+# To'liq nom yoziladi (".CallerIdService" emas) — AGP 8 da manifestda
+# package atributi yo'q, nisbiy nom namespace'ga bog'lanadi va
+# chalkashlik chiqishi mumkin.
+mf = 'android/app/src/main/AndroidManifest.xml'
+src = open(mf, encoding='utf-8').read()
+if 'CallerIdService' in src:
+    print('   manifest: xizmat allaqachon bor')
+else:
+    svc = f'''        <service
+            android:name="{pkg}.CallerIdService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+'''
+    i = src.rindex('</application>')
+    src = src[:i] + svc + src[i:]
+    open(mf, 'w', encoding='utf-8').write(src)
+    print('   manifest: CallerIdService qo\'shildi')
 PY
 
 echo "→ minSdk sozlanmoqda"
