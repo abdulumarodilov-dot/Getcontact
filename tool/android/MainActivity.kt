@@ -6,8 +6,9 @@
 // `flutter create` tomonidan qaytadan yaratiladi va qo'lda qo'yilgan
 // fayllar yo'qoladi.
 //
-// Uchta narsa shu faylda:
+// Fayldagi qismlar:
 //   MainActivity    — Flutter bilan bog'lovchi, ruxsat so'rash kanali
+//   CallerIdStore   — baza yo'li va kaliti (Keystore bilan himoyalangan)
 //   CallerIdService — kiruvchi qo'ng'iroqni ushlaydi
 //   CallerIdOverlay — ekran ustidagi kichik oyna
 //
@@ -18,6 +19,8 @@ package __PACKAGE__
 import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
+import android.database.Cursor
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -37,9 +40,14 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.RequiresApi
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import net.zetetic.database.DatabaseErrorHandler
+import net.zetetic.database.sqlcipher.SQLiteDatabase
+import java.io.File
 
 private const val TAG = "CallerId"
 
@@ -66,7 +74,8 @@ class MainActivity : FlutterFragmentActivity() {
                             // CallScreeningService Android 10 (API 29) dan bor
                             "supported" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q),
                             "overlay" to Settings.canDrawOverlays(this),
-                            "role" to hasScreeningRole()
+                            "role" to hasScreeningRole(),
+                            "db" to CallerIdStore.ready(this)
                         )
                     )
                     "requestOverlay" -> {
@@ -76,6 +85,16 @@ class MainActivity : FlutterFragmentActivity() {
                     "requestRole" -> {
                         requestScreeningRole()
                         result.success(null)
+                    }
+                    // Flutter baza yo'li va kalitini uzatadi — xizmat
+                    // qo'ng'iroq paytida shular bilan bazani ochadi
+                    "saveDb" -> {
+                        val ok = CallerIdStore.save(
+                            this,
+                            call.argument<String>("path"),
+                            call.argument<String>("key") ?: ""
+                        )
+                        result.success(ok)
                     }
                     else -> result.notImplemented()
                 }
@@ -131,6 +150,69 @@ class MainActivity : FlutterFragmentActivity() {
 }
 
 // ──────────────────────────────────────────────────────────
+// Baza yo'li va kaliti
+// ──────────────────────────────────────────────────────────
+
+/// Kalit Keystore bilan himoyalangan omborda saqlanadi — Flutter tomonida
+/// u qanday saqlansa, shu darajada. Oddiy SharedPreferences ishlatilmaydi,
+/// chunki baza tashqi xotirada (/sdcard/...) turgan bo'lishi mumkin va
+/// u holda kalit yagona himoya bo'lib qoladi.
+object CallerIdStore {
+
+    private const val FILE = "callerid_secure"
+    private const val K_PATH = "db_path"
+    private const val K_KEY = "db_key"
+
+    private fun prefs(ctx: Context): SharedPreferences {
+        val master = MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            ctx,
+            FILE,
+            master,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
+    fun save(ctx: Context, path: String?, key: String): Boolean {
+        if (path.isNullOrEmpty()) return false
+        return try {
+            prefs(ctx).edit().putString(K_PATH, path).putString(K_KEY, key).apply()
+            Log.i(TAG, "Baza bog'landi")
+            true
+        } catch (e: Throwable) {
+            Log.e(TAG, "Saqlashda xato: $e")
+            false
+        }
+    }
+
+    fun path(ctx: Context): String? = try {
+        prefs(ctx).getString(K_PATH, null)
+    } catch (e: Throwable) {
+        Log.e(TAG, "Yo'lni o'qishda: $e")
+        null
+    }
+
+    fun key(ctx: Context): String = try {
+        prefs(ctx).getString(K_KEY, "") ?: ""
+    } catch (e: Throwable) {
+        ""
+    }
+
+    /// Baza bog'langan va fayl joyida turibdimi
+    fun ready(ctx: Context): Boolean {
+        val p = path(ctx) ?: return false
+        return try {
+            File(p).exists()
+        } catch (e: Throwable) {
+            false
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────
 // Kiruvchi qo'ng'iroqni ushlovchi xizmat
 // ──────────────────────────────────────────────────────────
 
@@ -159,12 +241,91 @@ class CallerIdService : CallScreeningService() {
         }
 
         Log.i(TAG, "Kiruvchi qo'ng'iroq: $number")
-        CallerIdOverlay.show(applicationContext, number, lookupName(number))
+        val ctx = applicationContext
+
+        // Oynani darhol chiqaramiz, ism keyin qo'yiladi.
+        // Bazani ochish bir necha yuz millisekund olishi mumkin (kalitdan
+        // shifr kaliti hosil qilinadi), uni asosiy oqimda kutib turish
+        // qo'ng'iroq ekranini sekinlashtirardi.
+        CallerIdOverlay.show(ctx, number)
+
+        Thread {
+            val name = CallerIdLookup.find(ctx, number)
+            CallerIdOverlay.setName(name)
+        }.start()
+    }
+}
+
+// ──────────────────────────────────────────────────────────
+// Bazadan qidirish
+// ──────────────────────────────────────────────────────────
+
+object CallerIdLookup {
+
+    /// Bazadagi raqam ko'rinishi har xil bo'lishi mumkin, kiruvchi raqam
+    /// esa odatda "+998901234567" bo'lib keladi. Shuning uchun bir nechta
+    /// ko'rinishni birdan qidiramiz — `telefon` ustunida indeks bor,
+    /// shuning uchun bu tez ishlaydi.
+    fun variants(raw: String): List<String> {
+        val d = raw.filter { it.isDigit() }
+        if (d.isEmpty()) return emptyList()
+        val set = linkedSetOf(d)
+        if (d.length == 12 && d.startsWith("998")) set.add(d.substring(3))
+        if (d.length == 9) set.add("998$d")
+        if (d.length > 9) set.add(d.takeLast(9))
+        return set.toList()
     }
 
-    /// 2-bosqich: shu yerda bazadan F.I.Sh. qidiriladi.
-    /// Hozir ataylab bo'sh — avval oyna umuman chiqishini tekshiramiz.
-    private fun lookupName(number: String): String? = null
+    fun find(ctx: Context, number: String): String? {
+        val path = CallerIdStore.path(ctx) ?: return null
+        if (!File(path).exists()) {
+            Log.w(TAG, "Baza fayli topilmadi: $path")
+            return null
+        }
+
+        val cands = variants(number)
+        if (cands.isEmpty()) return null
+
+        var db: SQLiteDatabase? = null
+        return try {
+            System.loadLibrary("sqlcipher")
+
+            db = SQLiteDatabase.openOrCreateDatabase(
+                path,
+                CallerIdStore.key(ctx),
+                null,
+                // DIQQAT: standart ishlovchi bazani "buzilgan" deb hisoblab
+                // FAYLNI O'CHIRIB YUBORADI. Kalit noto'g'ri bo'lsa ham
+                // foydalanuvchining bazasi yo'qolmasligi uchun bo'sh
+                // ishlovchi beramiz — u faqat jurnalga yozadi.
+                DatabaseErrorHandler { Log.e(TAG, "Baza ochilmadi — fayl tegilmaydi") },
+                null
+            )
+
+            val marks = cands.joinToString(",") { "?" }
+            val cursor: Cursor = db.rawQuery(
+                "SELECT abonent FROM royxat WHERE telefon IN ($marks) LIMIT 1",
+                cands.toTypedArray()
+            )
+            cursor.use {
+                if (it.moveToFirst()) {
+                    val name = it.getString(0)?.trim()
+                    if (name.isNullOrEmpty()) null else name
+                } else {
+                    null
+                }
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Bazani o'qishda xato: $e")
+            null
+        } finally {
+            try {
+                db?.close()
+            } catch (e: Throwable) {
+                Log.w(TAG, "Bazani yopishda: $e")
+            }
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────
@@ -179,10 +340,11 @@ object CallerIdOverlay {
 
     private val main = Handler(Looper.getMainLooper())
     private var view: View? = null
+    private var nameView: TextView? = null
     private var appCtx: Context? = null
     private val hideTask = Runnable { hideNow() }
 
-    fun show(ctx: Context, number: String, name: String?) {
+    fun show(ctx: Context, number: String) {
         val app = ctx.applicationContext
         main.post {
             if (!Settings.canDrawOverlays(app)) {
@@ -219,7 +381,7 @@ object CallerIdOverlay {
             lp.y = dp(app, 80)
 
             try {
-                val v = buildView(app, number, name)
+                val v = buildView(app, number)
                 wm.addView(v, lp)
                 view = v
                 main.removeCallbacks(hideTask)
@@ -233,11 +395,24 @@ object CallerIdOverlay {
         }
     }
 
+    /// Baza javobi kelgach ismni qo'yadi. Oyna allaqachon yopilgan
+    /// bo'lsa — hech narsa qilmaydi.
+    fun setName(name: String?) {
+        main.post {
+            val tv = nameView ?: return@post
+            tv.text = name ?: "Bazada topilmadi"
+            tv.setTextColor(
+                if (name != null) Color.WHITE else Color.parseColor("#8CB8F2")
+            )
+        }
+    }
+
     fun hide() = main.post { hideNow() }
 
     private fun hideNow() {
         val v = view ?: return
         view = null
+        nameView = null
         main.removeCallbacks(hideTask)
         try {
             val wm = appCtx?.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
@@ -247,7 +422,7 @@ object CallerIdOverlay {
         }
     }
 
-    private fun buildView(ctx: Context, number: String, name: String?): View {
+    private fun buildView(ctx: Context, number: String): View {
         val pad = dp(ctx, 16)
 
         val card = LinearLayout(ctx).apply {
@@ -261,14 +436,14 @@ object CallerIdOverlay {
             setOnClickListener { hideNow() }
         }
 
-        card.addView(TextView(ctx).apply {
-            text = name ?: "Bazada topilmadi"
-            setTextColor(
-                if (name != null) Color.WHITE else Color.parseColor("#8CB8F2")
-            )
+        val tvName = TextView(ctx).apply {
+            text = "Qidirilmoqda..."
+            setTextColor(Color.parseColor("#8CB8F2"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
             setTypeface(typeface, Typeface.BOLD)
-        })
+        }
+        card.addView(tvName)
+        nameView = tvName
 
         card.addView(TextView(ctx).apply {
             text = number
