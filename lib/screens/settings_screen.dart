@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../theme.dart';
 import '../services/auth_service.dart';
 import '../services/biometric_service.dart';
@@ -43,6 +44,8 @@ class _SettingsScreenState extends State<SettingsScreen>
   bool _cidSupported = false; // Android 10+ va native qism bor
   bool _cidOverlay = false; // ekran ustida ko'rsatish ruxsati
   bool _cidRole = false; // qo'ng'iroqlarni tekshirish roli
+  bool _cidDb = false; // baza yo'li va kaliti xizmatga berilgan
+  String _cidMsg = '';
 
   @override
   void initState() {
@@ -68,6 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         _cidSupported = m['supported'] == true;
         _cidOverlay = m['overlay'] == true;
         _cidRole = m['role'] == true;
+        _cidDb = m['db'] == true;
       });
     } catch (e) {
       // Eski APK'da native qism yo'q — bo'limni ko'rsatmaymiz
@@ -81,6 +85,39 @@ class _SettingsScreenState extends State<SettingsScreen>
     } catch (e) {
       debugPrint('callerid $method: $e');
     }
+  }
+
+  /// Baza yo'li va kalitini Kotlin tomoniga uzatadi — xizmat qo'ng'iroq
+  /// paytida shular bilan bazani ochadi.
+  Future<void> _cidSyncDb() async {
+    final path = DbService.instance.path;
+    if (path == null || path.isEmpty) {
+      setState(() => _cidMsg =
+          "Avval bazani oching: qidiruv ekraniga qaytib biror raqam qidiring");
+      return;
+    }
+
+    // DIQQAT: kalit nomi db_service.dart dagi _keyName bilan aynan bir xil
+    // bo'lishi shart — u yerda o'zgarsa, bu yer ham o'zgaradi.
+    String? key;
+    try {
+      key = await const FlutterSecureStorage().read(key: 'royxat_db_key');
+    } catch (e) {
+      debugPrint("kalitni o'qishda: $e");
+    }
+
+    try {
+      final ok = await _cidChannel.invokeMethod<bool>('saveDb', {
+        'path': path,
+        'key': key ?? '', // bo'sh = shifrlanmagan baza
+      });
+      if (!mounted) return;
+      setState(() => _cidMsg = ok == true ? '' : "Bazani bog'lab bo'lmadi");
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _cidMsg = "Bazani bog'lab bo'lmadi: $e");
+    }
+    await _refreshCallerId();
   }
 
   Widget _cidStatusRow(bool ok, String text) {
@@ -492,6 +529,21 @@ class _SettingsScreenState extends State<SettingsScreen>
                                   ? 'Ekran ustida ko\'rsatish ruxsati bor'
                                   : "Ekran ustida ko'rsatish ruxsati yo'q",
                             ),
+                            _cidStatusRow(
+                              _cidDb,
+                              _cidDb
+                                  ? "Baza bog'langan"
+                                  : "Baza bog'lanmagan — ism ko'rsatilmaydi",
+                            ),
+                            if (_cidMsg.isNotEmpty)
+                              Text(
+                                _cidMsg,
+                                style: const TextStyle(
+                                  color: AppColors.error,
+                                  fontSize: 12,
+                                  height: 1.35,
+                                ),
+                              ),
                             if (!_cidRole)
                               PrimaryBtn(
                                 text: 'Rolni berish',
@@ -506,11 +558,20 @@ class _SettingsScreenState extends State<SettingsScreen>
                                   onTap: () => _cidRequest('requestOverlay'),
                                 ),
                               ),
-                            if (_cidRole && _cidOverlay)
+                            SizedBox(
+                              width: double.infinity,
+                              child: GhostBtn(
+                                text: _cidDb
+                                    ? "Bazani qayta bog'lash"
+                                    : "Bazani bog'lash",
+                                onTap: _cidSyncDb,
+                              ),
+                            ),
+                            if (_cidRole && _cidOverlay && _cidDb)
                               const Text(
-                                "Sinov bosqichi: hozircha oynada faqat "
-                                "raqamning o'zi chiqadi, F.I.Sh. keyingi "
-                                "yangilanishda qo'shiladi.",
+                                "Tayyor. Bazani almashtirsangiz yoki "
+                                "parolini o'zgartirsangiz, shu yerdan "
+                                "qayta bog'lang.",
                                 style: TextStyle(
                                   color: AppColors.accent,
                                   fontSize: 12,
