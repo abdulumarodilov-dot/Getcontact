@@ -199,13 +199,19 @@ for path in sys.argv[1:]:
         print(f'   {path}: allaqachon bor')
         continue
 
+    # sqlcipher-android compileOnly: kutubxona ilovada allaqachon bor
+    # (sqflite_sqlcipher orqali), lekin u yerda "implementation" bo'lgani
+    # uchun bizning kodimizga ko'rinmaydi. compileOnly faqat kompilyatsiya
+    # uchun qo'shadi — ikki nusxa yoki versiya to'qnashuvi bo'lmaydi.
     if path.endswith('.kts'):
         block = ('\ndependencies {\n'
                  '    implementation("androidx.security:security-crypto:1.0.0")\n'
+                 '    compileOnly("net.zetetic:sqlcipher-android:4.5.4")\n'
                  '}\n')
     else:
         block = ('\ndependencies {\n'
                  "    implementation 'androidx.security:security-crypto:1.0.0'\n"
+                 "    compileOnly 'net.zetetic:sqlcipher-android:4.5.4'\n"
                  '}\n')
 
     # Gradle bir nechta dependencies blokini qo'shib hisoblaydi,
