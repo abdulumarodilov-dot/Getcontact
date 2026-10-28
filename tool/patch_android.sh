@@ -183,6 +183,37 @@ PY
   fi
 done
 
+echo "→ androidx.security qo'shilmoqda (baza kalitini saqlash uchun)"
+# CallerIdStore kalitni EncryptedSharedPreferences'da saqlaydi.
+# Bu kutubxona flutter_secure_storage orqali transitiv keladi, lekin
+# u yerda "implementation" bo'lgani uchun bizning kodimiz unga qarshi
+# kompilyatsiya qila olmaydi — shuning uchun ochiq e'lon qilamiz.
+python3 - "$GRADLE_KTS" "$GRADLE" <<'PY'
+import os, sys
+
+for path in sys.argv[1:]:
+    if not os.path.exists(path):
+        continue
+    src = open(path, encoding='utf-8').read()
+    if 'security-crypto' in src:
+        print(f'   {path}: allaqachon bor')
+        continue
+
+    if path.endswith('.kts'):
+        block = ('\ndependencies {\n'
+                 '    implementation("androidx.security:security-crypto:1.0.0")\n'
+                 '}\n')
+    else:
+        block = ('\ndependencies {\n'
+                 "    implementation 'androidx.security:security-crypto:1.0.0'\n"
+                 '}\n')
+
+    # Gradle bir nechta dependencies blokini qo'shib hisoblaydi,
+    # shuning uchun faylning oxiriga qo'shsak kifoya.
+    open(path, 'w', encoding='utf-8').write(src + block)
+    print(f'   {path}: security-crypto qo\'shildi')
+PY
+
 echo "→ SQLCipher uchun ProGuard qoidalari"
 cat > android/app/proguard-rules.pro <<'EOF'
 # SQLCipher — R8 sinflarni o'chirib yubormasligi uchun.
