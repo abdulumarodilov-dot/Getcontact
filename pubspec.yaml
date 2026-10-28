@@ -57,8 +57,9 @@ flutter_launcher_icons:
   android: true
   ios: false
   image_path: "assets/icon.png"
-  adaptive_icon_background: "#05193F"
-  adaptive_icon_foreground: "assets/icon.png"
+  # Ikonkalarni qayta yasash: python3 tool/make_icons.py
+  adaptive_icon_background: "assets/icon_android_bg.png"
+  adaptive_icon_foreground: "assets/icon_android_fg.png"
 
 # ── Yuklash ekrani (Loading...) ───────────────────────
 # Yangilash: dart run flutter_native_splash:create
