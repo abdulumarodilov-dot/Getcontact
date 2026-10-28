@@ -141,6 +141,19 @@ if not pkg:
 print(f'   paket: {pkg}')
 
 tpl = open(TPL, encoding='utf-8').read()
+
+# Andoza haqiqatan Kotlin ekanini tekshiramiz. Noto'g'ri matn tushib
+# qolsa, Kotlin kompilyatori yuzlab "Expecting a top level declaration"
+# xatosi beradi va sabab ko'rinmay qoladi — shuning uchun shu yerda
+# aniq xabar bilan to'xtaymiz.
+missing = [m for m in ('__PACKAGE__', 'class MainActivity',
+                       'class CallerIdService') if m not in tpl]
+if missing:
+    print(f'   ❌ {TPL} andozaga o\'xshamaydi, topilmadi: {missing}')
+    print('      Faylning 1-qatori "// Bu fayl andoza" bo\'lishi kerak.')
+    print(f'      Hozirgi 1-qator: {tpl.splitlines()[0][:80] if tpl else "(bo\'sh)"}')
+    sys.exit(1)
+
 open(main_path, 'w', encoding='utf-8').write(tpl.replace('__PACKAGE__', pkg))
 print(f'   {main_path} andoza bilan almashtirildi')
 
@@ -203,15 +216,20 @@ for path in sys.argv[1:]:
     # (sqflite_sqlcipher orqali), lekin u yerda "implementation" bo'lgani
     # uchun bizning kodimizga ko'rinmaydi. compileOnly faqat kompilyatsiya
     # uchun qo'shadi — ikki nusxa yoki versiya to'qnashuvi bo'lmaydi.
+    # androidx.sqlite ham kerak: zetetic'ning SQLiteDatabase sinfi
+    # SupportSQLiteDatabase interfeysidan meros oladi va Kotlin ota
+    # sinfni ko'ra olmasa "Cannot access ... supertype" xatosi chiqadi.
     if path.endswith('.kts'):
         block = ('\ndependencies {\n'
                  '    implementation("androidx.security:security-crypto:1.0.0")\n'
                  '    compileOnly("net.zetetic:sqlcipher-android:4.5.4")\n'
+                 '    compileOnly("androidx.sqlite:sqlite:2.3.1")\n'
                  '}\n')
     else:
         block = ('\ndependencies {\n'
                  "    implementation 'androidx.security:security-crypto:1.0.0'\n"
                  "    compileOnly 'net.zetetic:sqlcipher-android:4.5.4'\n"
+                 "    compileOnly 'androidx.sqlite:sqlite:2.3.1'\n"
                  '}\n')
 
     # Gradle bir nechta dependencies blokini qo'shib hisoblaydi,
