@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme.dart';
 import '../services/auth_service.dart';
 import '../services/biometric_service.dart';
@@ -14,7 +15,10 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+// WidgetsBindingObserver — foydalanuvchi tizim sozlamalaridan qaytganda
+// ruxsat holatini qayta o'qiymiz, aks holda ekran eski holatni ko'rsatadi.
+class _SettingsScreenState extends State<SettingsScreen>
+    with WidgetsBindingObserver {
   final _oldP = TextEditingController();
   final _newP = TextEditingController();
   final _confP = TextEditingController();
@@ -31,11 +35,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _bioOn = false;
   String _bioLabel = 'Biometrika';
 
+  // ── Qo'ng'iroqda ko'rsatish (faqat Android) ──────────────
+  // Kotlin tomoni bilan aloqa. Nom MainActivity.kt dagi CHANNEL
+  // bilan aynan bir xil bo'lishi shart.
+  static const _cidChannel = MethodChannel('getcontact/callerid');
+
+  bool _cidSupported = false; // Android 10+ va native qism bor
+  bool _cidOverlay = false; // ekran ustida ko'rsatish ruxsati
+  bool _cidRole = false; // qo'ng'iroqlarni tekshirish roli
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refreshDbStatus();
     _refreshBio();
+    _refreshCallerId();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Ruxsat tizim sozlamalarida beriladi — qaytganda tekshiramiz
+    if (state == AppLifecycleState.resumed) _refreshCallerId();
+  }
+
+  Future<void> _refreshCallerId() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final m = await _cidChannel.invokeMapMethod<String, dynamic>('status');
+      if (!mounted || m == null) return;
+      setState(() {
+        _cidSupported = m['supported'] == true;
+        _cidOverlay = m['overlay'] == true;
+        _cidRole = m['role'] == true;
+      });
+    } catch (e) {
+      // Eski APK'da native qism yo'q — bo'limni ko'rsatmaymiz
+      debugPrint('callerid status: $e');
+    }
+  }
+
+  Future<void> _cidRequest(String method) async {
+    try {
+      await _cidChannel.invokeMethod<void>(method);
+    } catch (e) {
+      debugPrint('callerid $method: $e');
+    }
+  }
+
+  Widget _cidStatusRow(bool ok, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          ok ? Icons.check_circle : Icons.radio_button_unchecked,
+          size: 16,
+          color: ok ? AppColors.success : AppColors.hint,
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              color: ok ? AppColors.success : AppColors.hint,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _refreshBio() async {
@@ -77,6 +146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _oldP.dispose();
     _newP.dispose();
     _confP.dispose();
@@ -382,6 +452,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 height: 1.4,
                               ),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+
+                      // ── Qo'ng'iroqda ko'rsatish ───────────
+                      if (Platform.isAndroid && _cidSupported) ...[
+                        Panel(
+                          spacing: 10,
+                          children: [
+                            const Text(
+                              "Qo'ng'iroqda ko'rsatish",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const Text(
+                              "Kiruvchi qo'ng'iroqda ekran ustida kichik "
+                              "oyna chiqadi. Ishlashi uchun ikkala ruxsat "
+                              "ham kerak.",
+                              style: TextStyle(
+                                color: AppColors.labelBlue,
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                            _cidStatusRow(
+                              _cidRole,
+                              _cidRole
+                                  ? "Qo'ng'iroqlarni tekshirish roli berilgan"
+                                  : "Qo'ng'iroqlarni tekshirish roli yo'q",
+                            ),
+                            _cidStatusRow(
+                              _cidOverlay,
+                              _cidOverlay
+                                  ? 'Ekran ustida ko\'rsatish ruxsati bor'
+                                  : "Ekran ustida ko'rsatish ruxsati yo'q",
+                            ),
+                            if (!_cidRole)
+                              PrimaryBtn(
+                                text: 'Rolni berish',
+                                height: 50,
+                                onTap: () => _cidRequest('requestRole'),
+                              ),
+                            if (!_cidOverlay)
+                              SizedBox(
+                                width: double.infinity,
+                                child: GhostBtn(
+                                  text: 'Oyna ruxsatini berish',
+                                  onTap: () => _cidRequest('requestOverlay'),
+                                ),
+                              ),
+                            if (_cidRole && _cidOverlay)
+                              const Text(
+                                "Sinov bosqichi: hozircha oynada faqat "
+                                "raqamning o'zi chiqadi, F.I.Sh. keyingi "
+                                "yangilanishda qo'shiladi.",
+                                style: TextStyle(
+                                  color: AppColors.accent,
+                                  fontSize: 12,
+                                  height: 1.35,
+                                ),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 14),
