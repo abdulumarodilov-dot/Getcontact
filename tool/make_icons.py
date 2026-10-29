@@ -3,7 +3,8 @@
 
 Ishlatish (loyiha ildizidan):
     pip install cairosvg pillow
-    python3 tool/make_icons.py
+    python3 tool/make_icons.py          # «halqa» uslubi (to'q ko'k fon)
+    python3 tool/make_icons.py romb     # asl dizayn: romb, oq fon
 
 Natija (assets/):
     icon_ios.png        1024x1024, RGB  — iOS ikonkasi (shaffofliksiz)
@@ -36,6 +37,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS = os.path.join(ROOT, 'assets')
 
 SPLASH_BG = (0x05, 0x19, 0x3F)  # pubspec.yaml: flutter_native_splash.color
+
+# Android adaptiv ikonkasi: lupa markazi AYNAN tuval markazida turadi,
+# belgining eng uzoq nuqtasi (dasta uchi) markazdan tuvalning shuncha
+# ulushida bo'ladi. Ko'rinadigan doira — 72/108 = 0.333; 0.32 da dasta
+# uchi doira chetiga tegmaydi, kvadrat/tomchi shakllarda esa bemalol sig'adi.
+ANDROID_TIP = 0.32
 
 # ── Geometriya (birlik: namunadagi piksel; (0,0) — lupa markazi) ──
 # Namuna 1254x1254, lupa markazi (619.5, 589.5) — biroz yuqorida, chunki
@@ -287,30 +294,33 @@ def main():
     icon.save(os.path.join(ASSETS, 'icon.png'), optimize=True)
 
     # ── Android adaptiv ikonkasi ──
-    # Butun belgi xavfsiz doiraga (diametri tuvalning 61% i) sig'adi.
-    # Doira markazi dasta tomonga biroz suriladi, shunda halqa va dasta
-    # uchi doira chetidan bir xil uzoqlikda bo'ladi.
-    a = math.radians(HANDLE_ANGLE)
-    shift = (HANDLE_TIP - RING_R) / 2
-    anchor = (math.cos(a) * shift, math.sin(a) * shift)
-    radius = RING_R + shift
-    ppu_a = (BIG * 0.61 / 2) / radius
-    fg = glyph(ppu_a, anchor, (BIG / 2, BIG / 2))
+    # Lupa markazi tuval markazida. (Avval markaz dasta tomonga surilgan
+    # edi — Android'da lupa yuqori-chap burchakka siljib ko'rinardi.)
+    ppu_a = BIG * ANDROID_TIP / HANDLE_TIP
+    fg = glyph(ppu_a, (0, 0), (BIG / 2, BIG / 2))
     down(fg).save(os.path.join(ASSETS, 'icon_android_fg.png'), optimize=True)
     down(bg).convert('RGB').save(os.path.join(ASSETS, 'icon_android_bg.png'),
                                  optimize=True)
 
     # ── Yuklash ekrani: bir xil rangli fon (#05193F), belgi + nom ──
     splash = Image.new('RGBA', (BIG, BIG), SPLASH_BG + (255,))
-    ppu_s = (BIG * 0.42) / (2 * radius)
+    ppu_s = BIG * 0.20 / RING_R
     gc = (BIG / 2, BIG * 0.36)
     halo = Image.new('RGBA', (BIG, BIG), (0, 0, 0, 0))
     hr = BIG * 0.22
     ImageDraw.Draw(halo).ellipse((gc[0] - hr, gc[1] - hr, gc[0] + hr, gc[1] + hr),
                                  fill=(26, 123, 252, 55))
     splash.alpha_composite(halo.filter(ImageFilter.GaussianBlur(int(BIG * 0.07))))
-    splash.alpha_composite(glyph(ppu_s, anchor, gc))
+    splash.alpha_composite(glyph(ppu_s, (0, 0), gc))
 
+    save_splash(splash)
+
+    print('Tayyor (halqa):', ', '.join(sorted(
+        f for f in os.listdir(ASSETS) if f.endswith('.png'))))
+
+
+def save_splash(splash):
+    """Nom va izohni yozib, splash_logo.png sifatida saqlaydi."""
     d = ImageDraw.Draw(splash)
     title = font(['/usr/share/fonts/opentype/inter/Inter-Bold.otf',
                   'Inter-Bold.ttf', 'DejaVuSans-Bold.ttf'], 104 * SS)
@@ -323,9 +333,61 @@ def main():
     down(splash).convert('RGB').save(os.path.join(ASSETS, 'splash_logo.png'),
                                      optimize=True)
 
-    print('Tayyor:', ', '.join(sorted(
+
+def main_romb():
+    """Asl dizayn: yumaloq romb, tekis ranglar, oq fon."""
+    import icon_romb as R
+
+    os.makedirs(ASSETS, exist_ok=True)
+    white = Image.new('RGBA', (BIG, BIG), (255, 255, 255, 255))
+    body = R.body()
+    silhouette = body.replace('fill="#FFFFFF"', 'fill="#000"')
+
+    def romb(ppu, at, size=BIG, soft=True):
+        out = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+        if soft:
+            sil = render(silhouette, ppu, (0, 0), at, size)
+            out.alpha_composite(shadow(sil, (10, 40, 110), 0.28,
+                                       22 * ppu, 0, 16 * ppu))
+        out.alpha_composite(render(body, ppu, (0, 0), at, size))
+        return out
+
+    # ── iOS va oddiy Android ikonkasi ──
+    # Belgi chegaralari markazga olinadi va tuvalning 82% ini egallaydi.
+    l, t, r, b = R.extents()
+    ppu = BIG * 0.82 / max(r - l, b - t)
+    at = (BIG / 2 - (l + r) / 2 * ppu, BIG / 2 - (t + b) / 2 * ppu)
+    icon = white.copy()
+    icon.alpha_composite(romb(ppu, at))
+    icon = down(icon).convert('RGB')
+    icon.save(os.path.join(ASSETS, 'icon_ios.png'), optimize=True)
+    icon.save(os.path.join(ASSETS, 'icon.png'), optimize=True)
+
+    # ── Android adaptiv: lupa markazi tuval markazida ──
+    ppu_a = BIG * ANDROID_TIP / R.HANDLE_TIP
+    down(romb(ppu_a, (BIG / 2, BIG / 2))).save(
+        os.path.join(ASSETS, 'icon_android_fg.png'), optimize=True)
+    down(white).convert('RGB').save(
+        os.path.join(ASSETS, 'icon_android_bg.png'), optimize=True)
+
+    # ── Yuklash ekrani: ilova foni (#05193F), oq yorug'lik ustida romb ──
+    splash = Image.new('RGBA', (BIG, BIG), SPLASH_BG + (255,))
+    gc = (BIG / 2, BIG * 0.36)
+    halo = Image.new('RGBA', (BIG, BIG), (0, 0, 0, 0))
+    hr = BIG * 0.22
+    ImageDraw.Draw(halo).ellipse((gc[0] - hr, gc[1] - hr, gc[0] + hr, gc[1] + hr),
+                                 fill=(35, 95, 200, 70))
+    splash.alpha_composite(halo.filter(ImageFilter.GaussianBlur(int(BIG * 0.07))))
+    splash.alpha_composite(romb(BIG * 0.20 / R.CORNER, gc, soft=False))
+    save_splash(splash)
+
+    print('Tayyor (romb):', ', '.join(sorted(
         f for f in os.listdir(ASSETS) if f.endswith('.png'))))
 
 
 if __name__ == '__main__':
+    style = (sys.argv[1] if len(sys.argv) > 1 else 'halqa').lower()
+    if style == 'romb':
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.exit(main_romb())
     sys.exit(main())
