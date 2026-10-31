@@ -574,6 +574,14 @@ class DbService {
   /// `kMaxResults` tasi qaytariladi.
   ///
   /// Boshqa ustunlar (telefon, pasport, jshshir) uchun — aniq moslik.
+  /// Faqat o'qish uchun xom so'rov (masalan caller ID ro'yxatini tayyorlash).
+  Future<List<Map<String, Object?>>> rawQuery(String sql,
+      [List<Object?>? args]) async {
+    final db = _db;
+    if (db == null) throw StateError('Baza ochilmagan');
+    return db.rawQuery(sql, args);
+  }
+
   Future<List<DbRecord>> search(String column, String query) async {
     final db = _db;
     if (db == null) throw StateError('Baza ochilmagan');

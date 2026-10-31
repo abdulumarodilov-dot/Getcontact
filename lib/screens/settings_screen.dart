@@ -8,6 +8,7 @@ import '../services/biometric_service.dart';
 import '../services/db_service.dart';
 import '../widgets/common.dart';
 import '../widgets/db_password_dialog.dart';
+import '../widgets/ios_callerid_panel.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -582,6 +583,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                         ),
                         const SizedBox(height: 14),
                       ],
+
+                      // ── Qo'ng'iroqda ko'rsatish (iPhone, Jizzax) ──
+                      if (Platform.isIOS) const IosCallerIdPanel(),
 
                       // ── Parol ─────────────────────────────
                       Panel(

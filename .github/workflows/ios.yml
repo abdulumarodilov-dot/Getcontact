@@ -43,6 +43,13 @@ jobs:
       - name: CocoaPods
         run: cd ios && pod install --repo-update
 
+      # iPhone caller ID (Jizzax): Call Directory extension target'i.
+      # xcodeproj gem'i CocoaPods bilan birga keladi; bo'lmasa o'rnatamiz.
+      - name: Call Directory extension
+        run: |
+          ruby -e "require 'xcodeproj'" 2>/dev/null || gem install --user-install --no-document xcodeproj
+          ruby tool/ios/add_call_directory.rb
+
       # DIQQAT: Flutter muvaffaqiyatsiz build'da ko'pincha "Development Team
       # kerak" degan CHALG'ITUVCHI xabarni ko'rsatadi — haqiqiy Xcode xatosi
       # oddiy chiqishda butunlay yashiriladi (flutter/flutter#113203).
@@ -70,6 +77,22 @@ jobs:
           name: ios-build-log
           path: ios-build.log
           if-no-files-found: ignore
+
+      # --no-codesign bilan entitlements (App Group) ilovaga yozilmaydi.
+      # Ad-hoc imzo bilan ularni ichiga joylaymiz — qayta imzolovchi
+      # dasturlar (AltStore, Sideloadly) App Group'ni shundan oladi.
+      - name: Entitlements (ad-hoc imzo)
+        run: |
+          APP=build/ios/iphoneos/Runner.app
+          APPEX="$APP/PlugIns/CallDirectory.appex"
+          test -d "$APPEX" || { echo "❌ CallDirectory.appex ilovada yo'q"; ls -la "$APP" "$APP/PlugIns" || true; exit 1; }
+          find "$APP/Frameworks" -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) \
+            -exec codesign -f -s - {} \;
+          codesign -f -s - --entitlements ios/CallDirectory/CallDirectory.entitlements "$APPEX"
+          codesign -f -s - --entitlements ios/Runner/Runner.entitlements "$APP"
+          echo "── Runner entitlements:"; codesign -d --entitlements - "$APP" 2>/dev/null | tail -n +1
+          echo "── Extension entitlements:"; codesign -d --entitlements - "$APPEX" 2>/dev/null | tail -n +1
+          plutil -p "$APPEX/Info.plist" | grep -E 'CFBundleIdentifier|NSExtensionPointIdentifier|CFBundleShortVersionString'
 
       - name: IPA arxivlash
         run: |

@@ -43,6 +43,10 @@ dependencies:
   quick_link_ios:
     path: packages/quick_link_ios
 
+  # iPhone: qo'ng'iroq ekranida ism (Call Directory) — loyiha ichidagi plagin
+  callerid_ios:
+    path: packages/callerid_ios
+
 dev_dependencies:
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.13.1
