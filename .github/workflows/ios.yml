@@ -26,6 +26,22 @@ jobs:
       - name: Paketlar
         run: flutter pub get
 
+      - name: DIAG
+        run: |
+          n(){ echo "::notice title=$1::$(printf '%s' "$2" | head -c 3800 | sed ':a;N;$!ba;s/\n/%0A/g')"; }
+          n flutter "$(flutter --version | head -1)"
+          n runner_files "$(ls ios/Runner)"
+          n appdelegate "$(cat ios/Runner/AppDelegate.swift)"
+          [ -f ios/Runner/SceneDelegate.swift ] && n scenedelegate "$(cat ios/Runner/SceneDelegate.swift)" || true
+          n scene_manifest "$(plutil -extract UIApplicationSceneManifest xml1 -o - ios/Runner/Info.plist 2>&1)"
+          n app_links "$(grep -A3 '^  app_links:' pubspec.lock)"
+          P=$(ls -d ~/.pub-cache/hosted/pub.dev/app_links-* | tail -1)
+          n app_links_src "$(find $P/ios -name '*.swift' | sed "s|$P/||")"
+          n app_links_hooks "$(grep -rn 'func \|addSceneDelegate\|addApplicationDelegate' $P/ios --include=*.swift | sed "s|$P/||" | head -40)"
+          F=$(dirname $(dirname $(which flutter)))
+          n flutter_scene_api "$(grep -rln 'FlutterSceneLifeCycleDelegate' $F/bin/cache/artifacts/engine/ios-release 2>/dev/null | head -3; grep -rh 'addSceneDelegate\|FlutterSceneLifeCycleDelegate' $F/bin/cache/artifacts/engine/ios-release 2>/dev/null | head -8)"
+          exit 1
+
       # DIQQAT: pubspec.yaml dagi konfiguratsiya Android uchun mo'ljallangan.
       # Bu runner'da android/ papkasi yo'q, shuning uchun iOS'ning
       # o'z konfiguratsiya fayllarini ishlatamiz (-f / --path).
