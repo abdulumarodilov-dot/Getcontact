@@ -1,0 +1,22 @@
+name: diag
+on:
+  workflow_dispatch:
+jobs:
+  d:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter create --platforms=ios --project-name=getcontact . && bash tool/patch_ios.sh && flutter pub get
+      - name: report
+        run: |
+          n(){ echo "::notice title=$1::$(echo "$2" | head -c 3500 | sed ':a;N;$!ba;s/\n/%0A/g')"; }
+          n flutter "$(flutter --version | head -2)"
+          n runner_files "$(ls ios/Runner)"
+          n appdelegate "$(cat ios/Runner/AppDelegate.swift)"
+          [ -f ios/Runner/SceneDelegate.swift ] && n scenedelegate "$(cat ios/Runner/SceneDelegate.swift)"
+          n scene_manifest "$(plutil -extract UIApplicationSceneManifest xml1 -o - ios/Runner/Info.plist 2>&1)"
+          n app_links "$(grep -A3 '^  app_links:' pubspec.lock)"
+          P=$(find ~/.pub-cache/hosted -maxdepth 2 -type d -name 'app_links-*' | head -1)
+          n app_links_ios "$(ls $P/ios/app_links/Sources/app_links 2>/dev/null; ls $P/ios/Classes 2>/dev/null; grep -rn 'openURLContexts\|addSceneDelegate\|addApplicationDelegate\|willConnectTo' $P/ios | head -20)"
