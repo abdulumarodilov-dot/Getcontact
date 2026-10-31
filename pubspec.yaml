@@ -39,7 +39,9 @@ dependencies:
   url_launcher: ^6.3.3
 
   # Action Button / Shortcuts: getcontact://search?q=... havolalarini qabul qilish
-  app_links: ^6.3.0
+  # (o'zimizning plagin — app_links UIScene'da ilova yopiq bo'lsa havolani yo'qotardi)
+  quick_link_ios:
+    path: packages/quick_link_ios
 
 dev_dependencies:
   flutter_lints: ^3.0.0

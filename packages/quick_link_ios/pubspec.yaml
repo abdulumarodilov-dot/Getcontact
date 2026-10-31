@@ -1,0 +1,18 @@
+name: quick_link_ios
+description: getcontact:// havolalarini qabul qiladi (UIScene bilan, ilova yopiq bo'lsa ham).
+version: 0.1.0
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+  flutter: '>=3.35.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: QuickLinkIosPlugin

@@ -1,7 +1,5 @@
-import 'dart:async';
-
-import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
+import 'package:quick_link_ios/quick_link_ios.dart';
 
 /// Tashqaridan kelgan qidiruv so'rovi.
 ///
@@ -35,30 +33,21 @@ class QuickSearchLink {
   final ValueNotifier<QuickSearchRequest?> pending =
       ValueNotifier<QuickSearchRequest?>(null);
 
-  AppLinks? _appLinks;
-  StreamSubscription<Uri>? _sub;
+  bool _started = false;
 
-  // Bitta havola ikki marta kelishi mumkin (boshlang'ich havola + oqim).
+  // Bitta havola qisqa vaqtda ikki marta kelishi mumkin.
   String? _lastRaw;
   DateTime? _lastAt;
 
   /// main() da bir marta chaqiriladi.
+  ///
+  /// Havolalarni o'zimizning native plagin (quick_link_ios) qabul qiladi:
+  /// Flutter 3.38+ UIScene shablonida ilova yopiq holatdan havola bilan
+  /// ochilganda app_links paketi havolani yo'qotar edi.
   Future<void> init() async {
-    if (_appLinks != null) return;
-    final links = AppLinks();
-    _appLinks = links;
-
-    _sub = links.uriLinkStream.listen(_handle, onError: (Object e) {
-      debugPrint('quick search link: $e');
-    });
-
-    // Ilova aynan shu havola bilan ishga tushgan bo'lsa
-    try {
-      final initial = await links.getInitialLink();
-      if (initial != null) _handle(initial);
-    } catch (e) {
-      debugPrint('quick search initial link: $e');
-    }
+    if (_started) return;
+    _started = true;
+    await QuickLinkIos.listen(_handle);
   }
 
   /// So'rovni oladi va navbatdan o'chiradi.
@@ -142,11 +131,5 @@ class QuickSearchLink {
       return QuickSearchRequest('telefon', [local, '998$local']);
     }
     return QuickSearchRequest('telefon', [digits]);
-  }
-
-  void dispose() {
-    _sub?.cancel();
-    _sub = null;
-    _appLinks = null;
   }
 }
