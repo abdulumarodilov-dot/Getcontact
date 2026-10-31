@@ -28,7 +28,7 @@ jobs:
 
       - name: DIAG
         run: |
-          n(){ echo "::notice title=$1::$(printf '%s' "$2" | head -c 3800 | sed ':a;N;$!ba;s/\n/%0A/g')"; }
+          n(){ echo "::notice title=$1::$(printf '%s' "$2" | head -c 3800 | awk 'BEGIN{ORS="%0A"}1')"; }
           n flutter "$(flutter --version | head -1)"
           n runner_files "$(ls ios/Runner)"
           n appdelegate "$(cat ios/Runner/AppDelegate.swift)"
