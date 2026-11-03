@@ -43,6 +43,10 @@ intents = '''        <intent>
         <intent>
             <action android:name="android.intent.action.DIAL" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tg" />
+        </intent>
 '''
 if 'android:scheme="tel"' in src:
     print('   <queries>: tel/sms allaqachon bor')

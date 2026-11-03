@@ -39,7 +39,7 @@ pl.pop('NSTouchIDUsageDescription', None)  # eski noto'g'ri kalit
 
 # url_launcher: busiz canLaunchUrl("tel:...") iOS'da har doim false qaytaradi
 schemes = set(pl.get('LSApplicationQueriesSchemes') or [])
-schemes.update(['tel', 'sms'])
+schemes.update(['tel', 'sms', 'tg'])  # tg — Telegram ilovasi
 pl['LSApplicationQueriesSchemes'] = sorted(schemes)
 
 # Action Button / Shortcuts: getcontact://search?q=...
