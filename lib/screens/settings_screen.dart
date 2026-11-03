@@ -45,7 +45,12 @@ class _SettingsScreenState extends State<SettingsScreen>
   bool _cidOverlay = false; // ekran ustida ko'rsatish ruxsati
   bool _cidRole = false; // qo'ng'iroqlarni tekshirish roli
   bool _cidDb = false; // baza yo'li va kaliti xizmatga berilgan
+  bool _cidNotify = false; // bildirishnomalarga ruxsat
+  bool _cidBattery = false; // batareya cheklovidan chiqarilgan
+  bool _cidXiaomi = false; // Xiaomi / Redmi / POCO
   String _cidMsg = '';
+  String _cidLog = '';
+  bool _cidLogOpen = false;
 
   @override
   void initState() {
@@ -72,7 +77,13 @@ class _SettingsScreenState extends State<SettingsScreen>
         _cidOverlay = m['overlay'] == true;
         _cidRole = m['role'] == true;
         _cidDb = m['db'] == true;
+        _cidNotify = m['notify'] == true;
+        _cidBattery = m['battery'] == true;
+        _cidXiaomi = m['xiaomi'] == true;
       });
+      final log = await _cidChannel.invokeMethod<String>('log');
+      if (!mounted) return;
+      setState(() => _cidLog = log ?? '');
     } catch (e) {
       // Eski APK'da native qism yo'q — bo'limni ko'rsatmaymiz
       debugPrint('callerid status: $e');
@@ -85,6 +96,57 @@ class _SettingsScreenState extends State<SettingsScreen>
     } catch (e) {
       debugPrint('callerid $method: $e');
     }
+  }
+
+  /// Sinov: raqamni kiritib, xizmat qiladigan ishni qo'lda bajaradi —
+  /// oyna, bildirishnoma va bazadan qidirish. Baza va ruxsatlar
+  /// to'g'riligini qo'ng'iroq kutmasdan tekshirish uchun.
+  Future<void> _cidTest() async {
+    final ctrl = TextEditingController();
+    final number = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardBg,
+        title: const Text('Sinov', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.phone,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'Bazadagi raqam, masalan 901234567',
+            hintStyle: TextStyle(color: AppColors.hint),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Bekor'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Sinash'),
+          ),
+        ],
+      ),
+    );
+    if (number == null || number.isEmpty) return;
+    try {
+      await _cidChannel.invokeMethod<void>('test', {'number': number});
+    } catch (e) {
+      debugPrint('callerid test: $e');
+    }
+    // Qidiruv fonda ketadi — biroz kutib jurnalni yangilaymiz
+    await Future<void>.delayed(const Duration(seconds: 3));
+    await _refreshCallerId();
+    if (mounted) setState(() => _cidLogOpen = true);
+  }
+
+  Future<void> _cidClearLog() async {
+    try {
+      await _cidChannel.invokeMethod<void>('clearLog');
+    } catch (_) {}
+    await _refreshCallerId();
   }
 
   /// Baza yo'li va kalitini Kotlin tomoniga uzatadi — xizmat qo'ng'iroq
@@ -535,6 +597,19 @@ class _SettingsScreenState extends State<SettingsScreen>
                                   ? "Baza bog'langan"
                                   : "Baza bog'lanmagan — ism ko'rsatilmaydi",
                             ),
+                            _cidStatusRow(
+                              _cidNotify,
+                              _cidNotify
+                                  ? 'Bildirishnomalarga ruxsat bor'
+                                  : "Bildirishnomalarga ruxsat yo'q",
+                            ),
+                            if (_cidXiaomi)
+                              _cidStatusRow(
+                                _cidBattery,
+                                _cidBattery
+                                    ? "Batareya cheklovi yo'q"
+                                    : 'Batareya tejash ilovani cheklaydi',
+                              ),
                             if (_cidMsg.isNotEmpty)
                               Text(
                                 _cidMsg,
@@ -567,6 +642,132 @@ class _SettingsScreenState extends State<SettingsScreen>
                                 onTap: _cidSyncDb,
                               ),
                             ),
+                            if (!_cidNotify)
+                              SizedBox(
+                                width: double.infinity,
+                                child: GhostBtn(
+                                  text: 'Bildirishnomaga ruxsat berish',
+                                  onTap: () => _cidRequest('requestNotify'),
+                                ),
+                              ),
+                            if (_cidXiaomi) ...[
+                              const Text(
+                                "Xiaomi / Redmi: quyidagilarni ham yoqing — "
+                                "aks holda MIUI qo'ng'iroq paytida oynani "
+                                "to'sib qo'yadi:\n"
+                                "• Другие разрешения → «Всплывающие окна при "
+                                "работе в фоновом режиме» va «Экран блокировки»\n"
+                                "• Автозапуск → yoqilgan\n"
+                                "• Bildirishnoma sozlamasida «Всплывающие "
+                                "уведомления» va «Экран блокировки»",
+                                style: TextStyle(
+                                  color: AppColors.labelBlue,
+                                  fontSize: 12,
+                                  height: 1.4,
+                                ),
+                              ),
+                              SizedBox(
+                                width: double.infinity,
+                                child: GhostBtn(
+                                  text: 'Другие разрешения',
+                                  onTap: () => _cidRequest('openMiuiPerms'),
+                                ),
+                              ),
+                              SizedBox(
+                                width: double.infinity,
+                                child: GhostBtn(
+                                  text: 'Автозапуск',
+                                  onTap: () => _cidRequest('openAutostart'),
+                                ),
+                              ),
+                              SizedBox(
+                                width: double.infinity,
+                                child: GhostBtn(
+                                  text: 'Bildirishnoma sozlamasi',
+                                  onTap: () =>
+                                      _cidRequest('openNotifySettings'),
+                                ),
+                              ),
+                              if (!_cidBattery)
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: GhostBtn(
+                                    text: 'Batareya cheklovini olish',
+                                    onTap: () => _cidRequest('openBattery'),
+                                  ),
+                                ),
+                            ],
+                            SizedBox(
+                              width: double.infinity,
+                              child: GhostBtn(
+                                text: 'Sinab ko\'rish (raqam kiritib)',
+                                onTap: _cidTest,
+                              ),
+                            ),
+                            // ── Jurnal ──
+                            InkWell(
+                              onTap: () => setState(
+                                  () => _cidLogOpen = !_cidLogOpen),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      _cidLogOpen
+                                          ? Icons.expand_less
+                                          : Icons.expand_more,
+                                      color: AppColors.hint,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Expanded(
+                                      child: Text(
+                                        'Jurnal (oxirgi voqealar)',
+                                        style: TextStyle(
+                                          color: AppColors.hint,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                    if (_cidLogOpen && _cidLog.isNotEmpty)
+                                      GestureDetector(
+                                        onTap: _cidClearLog,
+                                        child: const Text(
+                                          'Tozalash',
+                                          style: TextStyle(
+                                            color: AppColors.accent,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (_cidLogOpen)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: AppColors.inputBg,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: SelectableText(
+                                  _cidLog.isEmpty
+                                      ? "Hali hech narsa yozilmagan. "
+                                          "Qo'ng'iroq kelsa yoki «Sinab "
+                                          "ko'rish» bosilsa, shu yerda "
+                                          "ko'rinadi."
+                                      : _cidLog,
+                                  style: const TextStyle(
+                                    color: AppColors.labelBlue,
+                                    fontSize: 11,
+                                    height: 1.4,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ),
                             if (_cidRole && _cidOverlay && _cidDb)
                               const Text(
                                 "Tayyor. Bazani almashtirsangiz yoki "

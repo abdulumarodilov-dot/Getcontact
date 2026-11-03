@@ -11,12 +11,19 @@
 //   CallerIdStore   — baza yo'li va kaliti (Keystore bilan himoyalangan)
 //   CallerIdService — kiruvchi qo'ng'iroqni ushlaydi
 //   CallerIdOverlay — ekran ustidagi kichik oyna
+//   CallerIdNotify  — bildirishnoma (MIUI oynani to'sganda ham ko'rinadi)
+//   CallerIdLog     — telefonda saqlanadigan qisqa jurnal (sozlamalarda ko'rinadi)
 //
 // Kotlin'da bir faylda bir nechta sinf bo'lishi mumkin, shuning uchun
 // hammasi bitta joyda — qo'shimcha fayl ko'chirish shart emas.
 package __PACKAGE__
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.role.RoleManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -29,6 +36,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.telecom.Call
 import android.telecom.CallScreeningService
@@ -48,6 +56,9 @@ import io.flutter.plugin.common.MethodChannel
 import net.zetetic.database.DatabaseErrorHandler
 import net.zetetic.database.sqlcipher.SQLiteDatabase
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val TAG = "CallerId"
 
@@ -75,9 +86,33 @@ class MainActivity : FlutterFragmentActivity() {
                             "supported" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q),
                             "overlay" to Settings.canDrawOverlays(this),
                             "role" to hasScreeningRole(),
-                            "db" to CallerIdStore.ready(this)
+                            "db" to CallerIdStore.ready(this),
+                            "notify" to notificationsAllowed(),
+                            "battery" to ignoringBattery(),
+                            "xiaomi" to isXiaomi()
                         )
                     )
+                    "log" -> result.success(CallerIdLog.read(this))
+                    "clearLog" -> {
+                        CallerIdLog.clear(this)
+                        result.success(null)
+                    }
+                    "requestNotify" -> {
+                        requestNotify()
+                        result.success(null)
+                    }
+                    "openNotifySettings" -> result.success(openNotifySettings())
+                    "openBattery" -> result.success(openBattery())
+                    "openMiuiPerms" -> result.success(openMiuiPerms())
+                    "openAutostart" -> result.success(openAutostart())
+                    // Sozlamalardan sinov: xizmat qiladigan ishni o'zi bajaradi
+                    // (oyna + bildirishnoma + bazadan qidirish)
+                    "test" -> {
+                        val number = call.argument<String>("number") ?: ""
+                        CallerIdLog.add(this, "Sinov: ${CallerIdLog.mask(number)}")
+                        CallerIdDisplay.present(applicationContext, number)
+                        result.success(null)
+                    }
                     "requestOverlay" -> {
                         requestOverlay()
                         result.success(null)
@@ -100,6 +135,106 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
     }
+
+    private fun notificationsAllowed(): Boolean = try {
+        getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() ?: false
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun ignoringBattery(): Boolean = try {
+        val pm = getSystemService(PowerManager::class.java)
+        pm?.isIgnoringBatteryOptimizations(packageName) ?: false
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun isXiaomi(): Boolean {
+        val m = (Build.MANUFACTURER ?: "").lowercase(Locale.ROOT)
+        val b = (Build.BRAND ?: "").lowercase(Locale.ROOT)
+        return listOf("xiaomi", "redmi", "poco").any { m.contains(it) || b.contains(it) }
+    }
+
+    /// Android 13+ da bildirishnoma ruxsati alohida so'raladi
+    private fun requestNotify() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7002)
+                return
+            } catch (e: Throwable) {
+                Log.w(TAG, "Bildirishnoma ruxsati: $e")
+            }
+        }
+        openNotifySettings()
+    }
+
+    private fun tryStart(vararg intents: Intent): Boolean {
+        for (i in intents) {
+            try {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+                return true
+            } catch (e: Throwable) {
+                Log.w(TAG, "Ochilmadi: ${i.component ?: i.action}: $e")
+            }
+        }
+        return false
+    }
+
+    private fun appDetails() = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.parse("package:$packageName")
+    )
+
+    /// Bildirishnoma kanali sozlamasi — MIUI'da bu yerda «Всплывающие
+    /// уведомления» va «Экран блокировки» alohida yoqiladi
+    private fun openNotifySettings(): Boolean {
+        CallerIdNotify.ensureChannel(this)
+        return tryStart(
+            Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                .putExtra(Settings.EXTRA_CHANNEL_ID, CallerIdNotify.CHANNEL),
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
+            appDetails()
+        )
+    }
+
+    /// Batareya cheklovidan chiqarish (MIUI fon xizmatlarini o'ldirmasin)
+    private fun openBattery(): Boolean = tryStart(
+        Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:$packageName")
+        ),
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        appDetails()
+    )
+
+    /// MIUI «Другие разрешения»: fonda oyna, qulflangan ekranda ko'rsatish
+    private fun openMiuiPerms(): Boolean = tryStart(
+        Intent("miui.intent.action.APP_PERM_EDITOR").setClassName(
+            "com.miui.securitycenter",
+            "com.miui.permcenter.permissions.PermissionsEditorActivity"
+        ).putExtra("extra_pkgname", packageName),
+        Intent("miui.intent.action.APP_PERM_EDITOR").setClassName(
+            "com.miui.securitycenter",
+            "com.miui.permcenter.permissions.AppPermissionsEditorActivity"
+        ).putExtra("extra_pkgname", packageName),
+        Intent("miui.intent.action.APP_PERM_EDITOR")
+            .putExtra("extra_pkgname", packageName),
+        appDetails()
+    )
+
+    /// MIUI «Автозапуск»
+    private fun openAutostart(): Boolean = tryStart(
+        Intent().setComponent(
+            ComponentName(
+                "com.miui.securitycenter",
+                "com.miui.permcenter.autostart.AutoStartManagementActivity"
+            )
+        ),
+        appDetails()
+    )
 
     /// "Boshqa ilovalar ustida ko'rsatish" sozlamasini ochadi
     private fun requestOverlay() {
@@ -222,6 +357,11 @@ object CallerIdStore {
 @RequiresApi(Build.VERSION_CODES.Q)
 class CallerIdService : CallScreeningService() {
 
+    override fun onCreate() {
+        super.onCreate()
+        CallerIdLog.add(applicationContext, "Xizmat tizim tomonidan ishga tushirildi")
+    }
+
     override fun onScreenCall(callDetails: Call.Details) {
         // DIQQAT: respondToCall HAR QANDAY holatda chaqirilishi shart.
         // Chaqirilmasa tizim qo'ng'iroqni kutib osib qo'yadi.
@@ -232,28 +372,22 @@ class CallerIdService : CallScreeningService() {
             Log.e(TAG, "respondToCall: $e")
         }
 
-        if (callDetails.callDirection != Call.Details.DIRECTION_INCOMING) return
+        val ctx = applicationContext
+
+        if (callDetails.callDirection != Call.Details.DIRECTION_INCOMING) {
+            CallerIdLog.add(ctx, "Chiquvchi qo'ng'iroq — o'tkazildi")
+            return
+        }
 
         // handle "tel:+998901234567" ko'rinishida keladi
         val number = callDetails.handle?.schemeSpecificPart?.trim()
         if (number.isNullOrEmpty()) {
-            Log.w(TAG, "Raqam yashirilgan")
+            CallerIdLog.add(ctx, "Kiruvchi: raqam yashirilgan")
             return
         }
 
-        Log.i(TAG, "Kiruvchi qo'ng'iroq: $number")
-        val ctx = applicationContext
-
-        // Oynani darhol chiqaramiz, ism keyin qo'yiladi.
-        // Bazani ochish bir necha yuz millisekund olishi mumkin (kalitdan
-        // shifr kaliti hosil qilinadi), uni asosiy oqimda kutib turish
-        // qo'ng'iroq ekranini sekinlashtirardi.
-        CallerIdOverlay.show(ctx, number)
-
-        Thread {
-            val name = CallerIdLookup.find(ctx, number)
-            CallerIdOverlay.setName(name)
-        }.start()
+        CallerIdLog.add(ctx, "Kiruvchi: ${CallerIdLog.mask(number)} — xizmat chaqirildi")
+        CallerIdDisplay.present(ctx, number)
     }
 }
 
@@ -278,9 +412,14 @@ object CallerIdLookup {
     }
 
     fun find(ctx: Context, number: String): String? {
-        val path = CallerIdStore.path(ctx) ?: return null
+        val path = CallerIdStore.path(ctx)
+        if (path == null) {
+            CallerIdLog.add(ctx, "Baza bog'lanmagan — sozlamalarda «Bazani bog'lash»")
+            return null
+        }
         if (!File(path).exists()) {
             Log.w(TAG, "Baza fayli topilmadi: $path")
+            CallerIdLog.add(ctx, "Baza fayli topilmadi (o'qish ruxsati yoki yo'l)")
             return null
         }
 
@@ -318,6 +457,7 @@ object CallerIdLookup {
             }
         } catch (e: Throwable) {
             Log.e(TAG, "Bazani o'qishda xato: $e")
+            CallerIdLog.add(ctx, "Bazani o'qishda xato: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
             null
         } finally {
             try {
@@ -349,7 +489,7 @@ object CallerIdOverlay {
         val app = ctx.applicationContext
         main.post {
             if (!Settings.canDrawOverlays(app)) {
-                Log.w(TAG, "Ekran ustida ko'rsatish ruxsati yo'q")
+                CallerIdLog.add(app, "Oyna: «Поверх других приложений» ruxsati yo'q")
                 return@post
             }
 
@@ -387,11 +527,11 @@ object CallerIdOverlay {
                 view = v
                 main.removeCallbacks(hideTask)
                 main.postDelayed(hideTask, SHOW_MS)
-                Log.i(TAG, "Oyna chiqarildi")
+                CallerIdLog.add(app, "Oyna chiqarildi")
             } catch (e: Throwable) {
                 // Ba'zi qobiqlar (MIUI va h.k.) ruxsat berilgan bo'lsa ham
-                // fon ilovasiga oyna chiqarishni to'sadi
-                Log.e(TAG, "Oynani chiqarib bo'lmadi: $e")
+                // fon ilovasiga oyna chiqarishni to'sadi — bildirishnoma qoladi
+                CallerIdLog.add(app, "Oyna to'sildi: ${e.javaClass.simpleName}")
             }
         }
     }
@@ -468,4 +608,148 @@ object CallerIdOverlay {
 
     private fun dp(ctx: Context, value: Int): Int =
         (value * ctx.resources.displayMetrics.density).toInt()
+}
+
+// ──────────────────────────────────────────────────────────
+// Oyna + bildirishnoma + qidiruv (xizmat va sinov uchun umumiy)
+// ──────────────────────────────────────────────────────────
+
+object CallerIdDisplay {
+
+    fun present(ctx: Context, number: String) {
+        // Oyna va bildirishnoma darhol chiqadi, ism keyin qo'yiladi.
+        // Bazani ochish (kalitdan shifr kaliti hosil qilish) bir necha
+        // yuz millisekund oladi — asosiy oqimda kutilmaydi.
+        CallerIdOverlay.show(ctx, number)
+        CallerIdNotify.show(ctx, number, null)
+
+        Thread {
+            val t0 = System.currentTimeMillis()
+            val name = CallerIdLookup.find(ctx, number)
+            val ms = System.currentTimeMillis() - t0
+            CallerIdLog.add(
+                ctx,
+                if (name != null) "Bazadan topildi ($ms ms)" else "Bazada topilmadi ($ms ms)"
+            )
+            CallerIdOverlay.setName(name)
+            CallerIdNotify.show(ctx, number, name ?: "Bazada topilmadi")
+        }.start()
+    }
+}
+
+// ──────────────────────────────────────────────────────────
+// Bildirishnoma
+// ──────────────────────────────────────────────────────────
+
+/// MIUI fon ilovasining ekran ustidagi oynasini ko'pincha to'sadi.
+/// Bildirishnoma esa shunday holatda ham chiqadi (qulflangan ekranda ham),
+/// shuning uchun ism ikkala yo'l bilan ko'rsatiladi.
+object CallerIdNotify {
+
+    const val CHANNEL = "callerid_v1"
+    private const val ID = 4401
+
+    fun ensureChannel(ctx: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        if (nm.getNotificationChannel(CHANNEL) != null) return
+        val ch = NotificationChannel(
+            CHANNEL,
+            "Qo'ng'iroqda ism",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Kiruvchi qo'ng'iroqda bazadan topilgan ism"
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            setSound(null, null)
+            enableVibration(false)
+        }
+        nm.createNotificationChannel(ch)
+    }
+
+    fun show(ctx: Context, number: String, name: String?) {
+        try {
+            ensureChannel(ctx)
+            val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+            if (!nm.areNotificationsEnabled()) {
+                if (name == null) CallerIdLog.add(ctx, "Bildirishnoma: ruxsat yo'q")
+                return
+            }
+
+            val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(ctx, CHANNEL).setTimeoutAfter(120_000)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(ctx).setPriority(Notification.PRIORITY_HIGH)
+            }
+            b.setSmallIcon(android.R.drawable.sym_call_incoming)
+                .setContentTitle(name ?: "Qidirilmoqda…")
+                .setContentText(number)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setShowWhen(true)
+                .setAutoCancel(true)
+
+            ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.let {
+                b.setContentIntent(
+                    PendingIntent.getActivity(
+                        ctx, 0, it,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                )
+            }
+
+            nm.notify(ID, b.build())
+            if (name != null) CallerIdLog.add(ctx, "Bildirishnoma chiqarildi")
+        } catch (e: Throwable) {
+            CallerIdLog.add(ctx, "Bildirishnoma xatosi: ${e.javaClass.simpleName}")
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────
+// Jurnal
+// ──────────────────────────────────────────────────────────
+
+/// Oxirgi voqealar — telefonda saqlanadi va sozlamalarda ko'rsatiladi.
+/// Xizmat chaqirilmayaptimi, oyna to'silyaptimi yoki baza ochilmayaptimi —
+/// shu yerdan bilinadi (logcat'siz).
+object CallerIdLog {
+
+    private const val FILE = "callerid_log"
+    private const val KEY = "lines"
+    private const val MAX = 40
+    private val fmt = SimpleDateFormat("dd.MM HH:mm:ss", Locale.ROOT)
+
+    @Synchronized
+    fun add(ctx: Context, msg: String) {
+        Log.i(TAG, msg)
+        try {
+            val p = ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            val old = (p.getString(KEY, "") ?: "").split('\n').filter { it.isNotEmpty() }
+            val lines = (listOf("${fmt.format(Date())}  $msg") + old).take(MAX)
+            p.edit().putString(KEY, lines.joinToString("\n")).apply()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Jurnal: $e")
+        }
+    }
+
+    fun read(ctx: Context): String = try {
+        ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY, "") ?: ""
+    } catch (e: Throwable) {
+        ""
+    }
+
+    fun clear(ctx: Context) {
+        try {
+            ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+                .edit().remove(KEY).apply()
+        } catch (e: Throwable) {
+        }
+    }
+
+    /// Jurnalda to'liq raqam emas, oxirgi 4 raqam
+    fun mask(n: String): String {
+        val d = n.filter { it.isDigit() }
+        return if (d.length > 4) "…" + d.takeLast(4) else d
+    }
 }

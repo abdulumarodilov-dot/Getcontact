@@ -20,6 +20,8 @@ perms = '''    <uses-permission android:name="android.permission.READ_EXTERNAL_S
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 '''
 if 'MANAGE_EXTERNAL_STORAGE' not in src:
     i = src.index('>', src.index('<manifest')) + 1
