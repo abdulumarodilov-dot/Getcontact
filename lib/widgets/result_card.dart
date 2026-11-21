@@ -238,6 +238,32 @@ class _PhoneActions {
   /// SMS ilovasini raqam qo'yilgan holda ochadi
   static Future<String?> sms(String raw) => _open('sms', raw);
 
+  /// Telegram'da shu raqam bo'yicha profilni ochadi.
+  ///
+  /// Bu Telegram'da raqamni qo'lda qidirish bilan bir xil: profil faqat
+  /// egasi «Кто может найти меня по номеру» ni yopmagan bo'lsa ko'rinadi.
+  /// Avval Telegram ilovasining o'z havolasi (tg://), u ishlamasa —
+  /// t.me havolasi (ilova o'rnatilmagan bo'lsa brauzerda ochiladi).
+  static Future<String?> telegram(String raw) async {
+    final number = normalize(raw);
+    if (!number.startsWith('+') || number.length < 10) return 'Raqam yaroqsiz';
+    final digits = number.substring(1);
+
+    final links = [
+      Uri.parse('tg://resolve?phone=$digits'),
+      Uri.parse('https://t.me/+$digits'),
+    ];
+    for (final uri in links) {
+      try {
+        final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (ok) return null;
+      } catch (e) {
+        debugPrint('telegram ($uri): $e');
+      }
+    }
+    return "Telegram'ni ochib bo'lmadi";
+  }
+
   static Future<String?> _open(String scheme, String raw) async {
     final number = normalize(raw);
     if (number.isEmpty) return 'Raqam yaroqsiz';
@@ -328,6 +354,11 @@ class _PhoneSheet extends StatelessWidget {
               icon: Icons.sms_outlined,
               text: 'SMS yozish',
               onTap: () => _run(context, _PhoneActions.sms),
+            ),
+            _SheetAction(
+              icon: Icons.send_outlined,
+              text: "Telegram'da ochish",
+              onTap: () => _run(context, _PhoneActions.telegram),
             ),
             _SheetAction(
               icon: Icons.copy_outlined,
