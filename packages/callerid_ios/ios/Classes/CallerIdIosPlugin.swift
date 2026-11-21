@@ -15,11 +15,18 @@ public class CallerIdIosPlugin: NSObject, FlutterPlugin {
     registrar.addMethodCallDelegate(CallerIdIosPlugin(), channel: channel)
   }
 
-  /// Extension'ning bundle ID'si: asosiy ilova ID + ".CallDirectory".
+  /// Bo'laklar (extension'lar) soni.
+  /// DIQQAT: tool/ios/add_call_directory.rb dagi PARTS va Dart'dagi
+  /// CallerIdIos.parts bilan bir xil bo'lishi shart.
+  static let parts = 4
+
+  /// N-bo'lak extension'ining bundle ID'si: asosiy ilova ID +
+  /// ".CallDirectory" (1-bo'lak) yoki ".CallDirectoryN".
   /// Qayta imzolashda (AltStore, Sideloadly) asosiy ID o'zgarsa ham
   /// extension ID shunga mos o'zgaradi — shuning uchun doim hisoblaymiz.
-  private var extensionId: String {
-    (Bundle.main.bundleIdentifier ?? "") + ".CallDirectory"
+  private func extensionId(_ part: Int) -> String {
+    let base = (Bundle.main.bundleIdentifier ?? "") + ".CallDirectory"
+    return part == 1 ? base : base + String(part)
   }
 
   /// Umumiy papka. Avval AltStore/SideStore yozgan haqiqiy guruh nomlari
@@ -49,36 +56,61 @@ public class CallerIdIosPlugin: NSObject, FlutterPlugin {
       result(CallerIdIosPlugin.containerURL()?.path)
 
     case "status":
-      var info: [String: Any] = [
-        "container": CallerIdIosPlugin.containerURL() != nil,
-        "extensionId": extensionId,
-      ]
-      CXCallDirectoryManager.sharedInstance.getEnabledStatusForExtension(
-        withIdentifier: extensionId
-      ) { status, error in
-        DispatchQueue.main.async {
-          switch status {
-          case .enabled: info["enabled"] = "enabled"
-          case .disabled: info["enabled"] = "disabled"
-          default: info["enabled"] = "unknown"
+      // To'rttala extension holatini so'raymiz, javoblar kelgach qaytaramiz
+      var states = [String](repeating: "unknown", count: Self.parts)
+      var firstError: String?
+      let group = DispatchGroup()
+      for part in 1...Self.parts {
+        group.enter()
+        CXCallDirectoryManager.sharedInstance.getEnabledStatusForExtension(
+          withIdentifier: extensionId(part)
+        ) { status, error in
+          DispatchQueue.main.async {
+            switch status {
+            case .enabled: states[part - 1] = "enabled"
+            case .disabled: states[part - 1] = "disabled"
+            default: states[part - 1] = "unknown"
+            }
+            if let error = error, firstError == nil {
+              firstError = CallerIdIosPlugin.describe(error)
+            }
+            group.leave()
           }
-          if let error = error {
-            info["error"] = CallerIdIosPlugin.describe(error)
-          }
-          result(info)
         }
+      }
+      group.notify(queue: .main) {
+        var info: [String: Any] = [
+          "container": CallerIdIosPlugin.containerURL() != nil,
+          "parts": Self.parts,
+          "states": states,
+          "enabledCount": states.filter { $0 == "enabled" }.count,
+        ]
+        if let e = firstError { info["error"] = e }
+        result(info)
       }
 
     case "reload":
+      // Argument — bo'lak raqami (1…parts)
+      let part = (call.arguments as? Int) ?? 1
       CXCallDirectoryManager.sharedInstance.reloadExtension(
-        withIdentifier: extensionId
+        withIdentifier: extensionId(part)
       ) { error in
         DispatchQueue.main.async {
-          if let error = error {
-            result(CallerIdIosPlugin.describe(error))
-          } else {
-            result(nil)  // muvaffaqiyat
+          guard let error = error else {
+            result(["ok": true])
+            return
           }
+          // O'chirilgan extension — xato emas, ogohlantirish: foydalanuvchi
+          // uni Sozlamalarda yoqqanda iOS ro'yxatni o'zi yuklaydi.
+          let ns = error as NSError
+          let disabled =
+            ns.domain == CXErrorCodeCallDirectoryManagerError.errorDomain
+            && ns.code == CXErrorCodeCallDirectoryManagerError.Code.extensionDisabled.rawValue
+          result([
+            "ok": false,
+            "disabled": disabled,
+            "message": CallerIdIosPlugin.describe(error),
+          ])
         }
       }
 

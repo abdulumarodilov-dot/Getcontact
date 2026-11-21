@@ -1,7 +1,17 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# Xcode loyihasiga Call Directory extension'ni qo'shadi (Jizzax caller ID).
+# Xcode loyihasiga 4 ta Call Directory extension'ni qo'shadi (caller ID).
+#
+# Nega 4 ta? iOS bitta extension'ga cheklangan miqdordagi raqamni qabul
+# qiladi (amalda ~1,5–2 mln). Ro'yxat 4 bo'lakka bo'linib, har bir bo'lakni
+# alohida extension yuklaydi — sig'im shuncha barobar oshadi.
+#
+# Nomlar: CallDirectory, CallDirectory2, CallDirectory3, CallDirectory4.
+# Birinchisining nomi eski versiyadagi bilan bir xil — foydalanuvchi uni
+# Sozlamalarda yoqib qo'ygan bo'lsa, yoqilganicha qoladi. Kod (Swift),
+# Info.plist va entitlements to'rttalasi uchun bitta; farqi faqat bundle ID
+# va Sozlamalarda ko'rinadigan nom ("Getcontact 1" … "Getcontact 4").
 #
 #   ruby tool/ios/add_call_directory.rb
 #
@@ -10,8 +20,8 @@
 #
 # Nima qiladi:
 #   1. tool/ios/CallDirectory/* → ios/CallDirectory/ ga nusxalaydi
-#   2. "CallDirectory" app-extension target'ini yaratadi (CallKit bilan)
-#   3. Uni Runner'ga dependency va "Embed Foundation Extensions" sifatida
+#   2. 4 ta app-extension target'ini yaratadi (CallKit bilan)
+#   3. Ularni Runner'ga dependency va "Embed Foundation Extensions" sifatida
 #      qo'shadi ("Thin Binary" skriptidan OLDIN — aks holda Xcode
 #      "Cycle inside Runner" xatosini beradi)
 #   4. Ikkala target uchun App Group entitlements faylini yozadi
@@ -24,7 +34,12 @@ IOS = File.join(ROOT, 'ios')
 PROJ = File.join(IOS, 'Runner.xcodeproj')
 SRC = File.join(ROOT, 'tool', 'ios', 'CallDirectory')
 DST = File.join(IOS, 'CallDirectory')
-EXT = 'CallDirectory'
+EXT = 'CallDirectory' # papka, guruh va entitlements nomi
+
+# DIQQAT: soni Swift plaginidagi `parts` va Dart'dagi `CallerIdIos.parts`
+# bilan bir xil bo'lishi shart.
+PARTS = 4
+TARGETS = (1..PARTS).map { |i| [i, i == 1 ? EXT : "#{EXT}#{i}"] }
 MIN_IOS = '13.0'
 
 abort "❌ #{PROJ} topilmadi" unless Dir.exist?(PROJ)
@@ -74,51 +89,7 @@ runner.build_configurations.each do |c|
   c.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Runner.entitlements'
 end
 
-# ── 2. Target ─────────────────────────────────────────────
-if project.targets.any? { |t| t.name == EXT }
-  puts "→ #{EXT} target allaqachon bor — faqat fayllar yangilandi"
-  project.save
-  exit 0
-end
-
-ext = project.new_target(:app_extension, EXT, :ios, MIN_IOS, nil, :swift)
-
-# Loyihadagi har bir konfiguratsiya (Debug/Release/Profile) target'da ham
-# bo'lishi kerak, aks holda "flutter build" Profile'da yiqiladi.
-existing = ext.build_configurations.map(&:name)
-project.build_configurations.each do |pc|
-  next if existing.include?(pc.name)
-  base = ext.build_configurations.find { |c| c.name == 'Release' }
-  nc = project.new(Xcodeproj::Project::Object::XCBuildConfiguration)
-  nc.name = pc.name
-  nc.build_settings = base.build_settings.dup
-  ext.build_configuration_list.build_configurations << nc
-end
-
-ext.build_configurations.each do |c|
-  s = c.build_settings
-  s['PRODUCT_BUNDLE_IDENTIFIER'] = "#{bundle_id}.#{EXT}"
-  s['PRODUCT_NAME'] = '$(TARGET_NAME)'
-  s['INFOPLIST_FILE'] = "#{EXT}/Info.plist"
-  s['GENERATE_INFOPLIST_FILE'] = 'NO'
-  s['CODE_SIGN_ENTITLEMENTS'] = "#{EXT}/#{EXT}.entitlements"
-  s['CODE_SIGN_STYLE'] = 'Automatic'
-  s['SWIFT_VERSION'] = '5.0'
-  s['IPHONEOS_DEPLOYMENT_TARGET'] = MIN_IOS
-  s['TARGETED_DEVICE_FAMILY'] = '1,2'
-  s['SKIP_INSTALL'] = 'YES'
-  s['APPLICATION_EXTENSION_API_ONLY'] = 'YES'
-  s['ENABLE_BITCODE'] = 'NO'
-  s['MARKETING_VERSION'] = marketing
-  s['CURRENT_PROJECT_VERSION'] = build_no
-  s['LD_RUNPATH_SEARCH_PATHS'] = [
-    '$(inherited)',
-    '@executable_path/Frameworks',
-    '@executable_path/../../Frameworks'
-  ]
-end
-
-# Fayl havolalari (guruh yo'li "CallDirectory" — ios/ ga nisbatan)
+# ── 2. Fayl havolalari (bitta guruh, to'rttala target uchun) ──
 grp = project.main_group.children.find { |g| g.display_name == EXT } ||
       project.main_group.new_group(EXT, EXT)
 swift_ref = grp.files.find { |f| f.path == 'CallDirectoryHandler.swift' } ||
@@ -126,18 +97,71 @@ swift_ref = grp.files.find { |f| f.path == 'CallDirectoryHandler.swift' } ||
 %w[Info.plist].push("#{EXT}.entitlements").each do |f|
   grp.new_reference(f) unless grp.files.any? { |r| r.path == f }
 end
-ext.add_file_references([swift_ref])
-ext.add_system_framework('CallKit')
 
-# ── 3. Runner'ga ulash ────────────────────────────────────
-runner.add_dependency(ext)
+# "Embed Foundation Extensions" — bitta bosqich, ichida 4 ta extension
+embed = runner.copy_files_build_phases.find { |p| p.name == 'Embed Foundation Extensions' }
+unless embed
+  embed = runner.new_copy_files_build_phase('Embed Foundation Extensions')
+  embed.symbol_dst_subfolder_spec = :plug_ins
+end
 
-embed = runner.new_copy_files_build_phase('Embed Foundation Extensions')
-embed.symbol_dst_subfolder_spec = :plug_ins
-bf = embed.add_file_reference(ext.product_reference, true)
-bf.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
+# ── 3. Target'lar ─────────────────────────────────────────
+TARGETS.each do |num, name|
+  if project.targets.any? { |t| t.name == name }
+    puts "→ #{name} allaqachon bor"
+    next
+  end
 
-# "Thin Binary" (va boshqa Flutter skriptlari) dan oldinga qo'yamiz
+  ext = project.new_target(:app_extension, name, :ios, MIN_IOS, nil, :swift)
+
+  # Loyihadagi har bir konfiguratsiya (Debug/Release/Profile) target'da ham
+  # bo'lishi kerak, aks holda "flutter build" Profile'da yiqiladi.
+  existing = ext.build_configurations.map(&:name)
+  project.build_configurations.each do |pc|
+    next if existing.include?(pc.name)
+    base = ext.build_configurations.find { |c| c.name == 'Release' }
+    nc = project.new(Xcodeproj::Project::Object::XCBuildConfiguration)
+    nc.name = pc.name
+    nc.build_settings = base.build_settings.dup
+    ext.build_configuration_list.build_configurations << nc
+  end
+
+  ext.build_configurations.each do |c|
+    s = c.build_settings
+    s['PRODUCT_BUNDLE_IDENTIFIER'] = "#{bundle_id}.#{name}"
+    s['PRODUCT_NAME'] = '$(TARGET_NAME)'
+    s['CID_DISPLAY_NAME'] = "Getcontact #{num}" # Info.plist'da ishlatiladi
+    s['INFOPLIST_FILE'] = "#{EXT}/Info.plist"
+    s['GENERATE_INFOPLIST_FILE'] = 'NO'
+    s['CODE_SIGN_ENTITLEMENTS'] = "#{EXT}/#{EXT}.entitlements"
+    s['CODE_SIGN_STYLE'] = 'Automatic'
+    s['SWIFT_VERSION'] = '5.0'
+    s['IPHONEOS_DEPLOYMENT_TARGET'] = MIN_IOS
+    s['TARGETED_DEVICE_FAMILY'] = '1,2'
+    s['SKIP_INSTALL'] = 'YES'
+    s['APPLICATION_EXTENSION_API_ONLY'] = 'YES'
+    s['ENABLE_BITCODE'] = 'NO'
+    s['MARKETING_VERSION'] = marketing
+    s['CURRENT_PROJECT_VERSION'] = build_no
+    s['LD_RUNPATH_SEARCH_PATHS'] = [
+      '$(inherited)',
+      '@executable_path/Frameworks',
+      '@executable_path/../../Frameworks'
+    ]
+  end
+
+  ext.add_file_references([swift_ref])
+  ext.add_system_framework('CallKit')
+
+  runner.add_dependency(ext)
+  bf = embed.add_file_reference(ext.product_reference, true)
+  bf.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
+
+  puts "→ #{name} qo'shildi (#{bundle_id}.#{name}, «Getcontact #{num}»)"
+end
+
+# ── 4. Embed bosqichini "Thin Binary" (va boshqa Flutter skriptlari) dan
+#      oldinga qo'yamiz — aks holda Xcode "Cycle inside Runner" xatosini beradi
 runner.build_phases.delete(embed)
 idx = runner.build_phases.index do |p|
   p.is_a?(Xcodeproj::Project::Object::PBXShellScriptBuildPhase) &&
@@ -148,6 +172,8 @@ runner.build_phases.insert(idx, embed)
 
 project.save
 
-puts "✅ #{EXT} extension qo'shildi (#{bundle_id}.#{EXT}, v#{marketing}+#{build_no})"
+puts "✅ #{PARTS} ta Call Directory extension tayyor (v#{marketing}+#{build_no})"
 puts '   Runner build phases:'
 runner.build_phases.each { |p| puts "     - #{p.display_name}" }
+puts '   Embed ichida:'
+embed.files.each { |f| puts "     - #{f.display_name}" }

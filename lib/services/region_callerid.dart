@@ -52,8 +52,10 @@ const _toshkent = ['toshkent', 'tashkent', 'ашкент', 'ошкент'];
 /// ro'yxat: tanlangan hududlardagi abonentlar.
 ///
 /// iOS bitta extension'ga cheklangan miqdordagi raqamni qabul qiladi
-/// (aniq chegara e'lon qilinmagan, amalda ~1,5–2 mln), shuning uchun butun
-/// baza emas, faqat tanlangan hududlar olinadi.
+/// (aniq chegara e'lon qilinmagan, amalda ~1,5–2 mln). Shuning uchun:
+///   • butun baza emas, faqat tanlangan hududlar olinadi;
+///   • ro'yxat [CallerIdIos.parts] ta teng bo'lakka bo'linib, har bir
+///     bo'lakni alohida extension yuklaydi.
 class RegionCallerId {
   RegionCallerId._();
 
@@ -94,10 +96,15 @@ class RegionCallerId {
         exclude: _viloyatMarkers),
   ];
 
-  static const fileName = 'callerid.bin';
+  /// N-bo'lak fayli. Nomlar CallDirectoryHandler.swift dagi bilan bir xil;
+  /// 1-bo'lak eski versiyadagi nomini saqlaydi.
+  static String fileFor(int part) =>
+      part == 1 ? 'callerid.bin' : 'callerid_$part.bin';
 
-  /// Taxminiy chegara. Undan oshsa ogohlantiramiz (iOS baribir urinib ko'radi).
-  static const softLimit = 2000000;
+  /// Bitta bo'lakka taxminiy chegara. Undan oshsa ogohlantiramiz
+  /// (iOS baribir urinib ko'radi).
+  static const softLimitPerPart = 1500000;
+  static int get softLimit => softLimitPerPart * CallerIdIos.parts;
 
   static const _chunk = 250000; // bir so'rovda ko'riladigan qatorlar (rowid)
   static const _maxLabel = 60;
@@ -202,11 +209,12 @@ class RegionCallerId {
     return (parts.join(' OR '), args);
   }
 
-  /// Ro'yxatni tayyorlab, extension'ni qayta yuklaydi.
+  /// Ro'yxatni tayyorlab, extension'larni qayta yuklaydi.
   ///
   /// [onProgress] — (0..1 ulush, topilgan raqamlar soni, bosqich matni).
-  /// Qaytaradi: topilgan raqamlar soni. Xatoda [CallerIdException].
-  static Future<int> build(
+  /// Qaytaradi: raqamlar soni va Sozlamalarda o'chirilgan bo'laklar.
+  /// Xatoda [CallerIdException].
+  static Future<BuildResult> build(
       List<String> regionIds,
       void Function(double, int, String) onProgress) async {
     if (regionIds.isEmpty) {
@@ -273,12 +281,32 @@ class RegionCallerId {
             "Manzilida ${names(regionIds)} yozilgan raqam topilmadi");
       }
 
-      onProgress(0.92, found.length, 'Fayl yozilmoqda');
-      await _writeFile('$container/$fileName', found);
+      // Saralab, teng bo'laklarga ajratamiz. Har bir bo'lak o'z ichida
+      // o'sish tartibida qoladi — iOS shuni talab qiladi.
+      final keys = found.keys.toList()..sort();
+      final parts = CallerIdIos.parts;
+      final size = (keys.length + parts - 1) ~/ parts;
 
-      onProgress(0.95, found.length, "iOS'ga yuklanmoqda");
-      final err = await CallerIdIos.reload();
-      if (err != null) throw CallerIdException(err);
+      onProgress(0.91, found.length, 'Fayllar yozilmoqda');
+      for (var part = 1; part <= parts; part++) {
+        final from = ((part - 1) * size).clamp(0, keys.length);
+        final to = (part * size).clamp(0, keys.length);
+        await _writeFile('$container/${fileFor(part)}',
+            keys.sublist(from, to), found);
+      }
+
+      final disabled = <int>[];
+      for (var part = 1; part <= parts; part++) {
+        onProgress(0.93 + 0.07 * (part - 1) / parts, found.length,
+            "iOS'ga yuklanmoqda ($part/$parts)");
+        final r = await CallerIdIos.reload(part);
+        if (r.ok) continue;
+        if (r.disabled) {
+          disabled.add(part);
+          continue;
+        }
+        throw CallerIdException("Getcontact $part: ${r.message ?? 'xato'}");
+      }
 
       final p = await SharedPreferences.getInstance();
       await p.setInt(_kCount, found.length);
@@ -286,30 +314,42 @@ class RegionCallerId {
       await p.setStringList(_kBuilt, regionIds);
 
       onProgress(1, found.length, 'Tayyor');
-      return found.length;
+      return BuildResult(found.length, disabled);
     } finally {
       await CallerIdIos.keepAwake(false);
     }
   }
 
-  /// Ro'yxatni o'chiradi (bo'sh fayl) va extension'ni qayta yuklaydi.
+  /// Ro'yxatni o'chiradi (bo'sh fayllar) va extension'larni qayta yuklaydi.
+  /// Qaytaradi: xato matni yoki null.
   static Future<String?> clear() async {
     final container = await CallerIdIos.containerPath();
     if (container != null) {
-      await _writeFile('$container/$fileName', const {});
+      for (var part = 1; part <= CallerIdIos.parts; part++) {
+        await _writeFile('$container/${fileFor(part)}', const [], const {});
+      }
     }
     final p = await SharedPreferences.getInstance();
     await p.remove(_kCount);
     await p.remove(_kTime);
     await p.remove(_kBuilt);
-    return CallerIdIos.reload();
+
+    for (var part = 1; part <= CallerIdIos.parts; part++) {
+      final r = await CallerIdIos.reload(part);
+      // O'chirilgan extension'ni yangilab bo'lmaydi, lekin u yoqilganda
+      // bo'sh faylni o'qiydi — ya'ni bu ham xato emas
+      if (!r.ok && !r.disabled) return "Getcontact $part: ${r.message}";
+    }
+    return null;
   }
 
   /// Format CallDirectoryHandler.swift dagi bilan aynan bir xil:
   ///   "GCCD" | u32 versiya=1 | u32 N | i64[N] raqamlar |
   ///   u32[N+1] ism boshlanishlari | UTF-8 ismlar
-  static Future<void> _writeFile(String path, Map<int, String> data) async {
-    final keys = data.keys.toList()..sort();
+  ///
+  /// [keys] — shu faylga tushadigan raqamlar, o'sish tartibida.
+  static Future<void> _writeFile(
+      String path, List<int> keys, Map<int, String> data) async {
     final n = keys.length;
 
     final header = ByteData(12)
@@ -343,6 +383,17 @@ class RegionCallerId {
     await sink.close();
     await tmp.rename(path);
   }
+}
+
+class BuildResult {
+  /// Ro'yxatdagi raqamlar soni
+  final int count;
+
+  /// Sozlamalarda o'chirilgan bo'laklar (1…parts) — ulardagi raqamlarda
+  /// ism chiqmaydi, toki foydalanuvchi ularni yoqmaguncha
+  final List<int> disabledParts;
+
+  const BuildResult(this.count, this.disabledParts);
 }
 
 class CallerIdException implements Exception {

@@ -4,7 +4,16 @@ import Foundation
 /// Call Directory extension: iOS qo'ng'iroq kelganda raqamni shu ro'yxatdan
 /// topib, ekranda ismni ko'rsatadi.
 ///
-/// Ro'yxatni asosiy ilova yozadi (umumiy papkada `callerid.bin`):
+/// Ro'yxat 4 bo'lakka bo'lingan, har bir extension o'z bo'lagini o'qiydi.
+/// Qaysi bo'lak — bundle ID oxiridan aniqlanadi:
+///
+///   ...CallDirectory   → callerid.bin    (1-bo'lak; nomi eski versiyadan)
+///   ...CallDirectory2  → callerid_2.bin
+///   ...CallDirectory3  → callerid_3.bin
+///   ...CallDirectory4  → callerid_4.bin
+///
+/// Kod to'rttala extension uchun bitta. Fayllarni asosiy ilova yozadi
+/// (umumiy papkada). Fayl formati:
 ///
 ///   0   4  "GCCD"
 ///   4   4  versiya (1), little-endian
@@ -17,7 +26,7 @@ import Foundation
 /// xotira limitidan oshmaydi.
 final class CallDirectoryHandler: CXCallDirectoryProvider {
 
-  private static let fileName = "callerid.bin"
+  private static let marker = ".CallDirectory"
   private static let batch = 5_000
 
   override func beginRequest(with context: CXCallDirectoryExtensionContext) {
@@ -41,7 +50,7 @@ final class CallDirectoryHandler: CXCallDirectoryProvider {
       // Umumiy papka yo'q — bo'sh ro'yxat bilan tugatamiz
       return
     }
-    let url = dir.appendingPathComponent(Self.fileName)
+    let url = dir.appendingPathComponent(Self.partFileName())
     guard FileManager.default.fileExists(atPath: url.path) else { return }
 
     let data = try Data(contentsOf: url, options: .alwaysMapped)
@@ -88,16 +97,28 @@ final class CallDirectoryHandler: CXCallDirectoryProvider {
     }
   }
 
+  /// Bu extension o'qiydigan fayl nomi (yuqoridagi jadvalga qarang).
+  static func partFileName() -> String {
+    let id = Bundle.main.bundleIdentifier ?? ""
+    guard let r = id.range(of: marker, options: .backwards) else {
+      return "callerid.bin"
+    }
+    let n = id[r.upperBound...]
+    return n.isEmpty ? "callerid.bin" : "callerid_\(n).bin"
+  }
+
   /// Asosiy ilova bilan bir xil qoida: avval ALTAppGroups, keyin
-  /// "group.<asosiy ilova ID>" (extension ID'dan ".CallDirectory" olib tashlanadi).
+  /// "group.<asosiy ilova ID>" (extension ID'dan ".CallDirectoryN" olib
+  /// tashlanadi).
   static func containerURL() -> URL? {
     var groups: [String] = []
     if let alt = Bundle.main.object(forInfoDictionaryKey: "ALTAppGroups") as? [String] {
       groups.append(contentsOf: alt)
     }
     if var id = Bundle.main.bundleIdentifier {
-      let suffix = ".CallDirectory"
-      if id.hasSuffix(suffix) { id.removeLast(suffix.count) }
+      if let r = id.range(of: marker, options: .backwards) {
+        id = String(id[..<r.lowerBound])
+      }
       groups.append("group." + id)
     }
     for g in groups {

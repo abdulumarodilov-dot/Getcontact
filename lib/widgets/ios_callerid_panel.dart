@@ -8,7 +8,9 @@ import 'common.dart';
 /// Sozlamalardagi «Qo'ng'iroqda ko'rsatish» bo'limi — faqat iPhone.
 ///
 /// Tanlangan hududlar abonentlarining ro'yxatini tayyorlaydi; iOS kiruvchi
-/// qo'ng'iroqda raqam ostida ismni o'zi ko'rsatadi.
+/// qo'ng'iroqda raqam ostida ismni o'zi ko'rsatadi. Ro'yxat
+/// [CallerIdIos.parts] ta extension'ga bo'lingan — Sozlamalarda ularning
+/// hammasi yoqilishi kerak.
 class IosCallerIdPanel extends StatefulWidget {
   const IosCallerIdPanel({super.key});
 
@@ -20,7 +22,11 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
     with WidgetsBindingObserver {
   bool _loaded = false;
   bool _container = false;
-  String _enabled = 'unknown'; // enabled | disabled | unknown
+
+  int _parts = CallerIdIos.parts;
+  int _enabledCount = 0;
+  List<String> _states = const [];
+
   (int, DateTime, List<String>)? _last;
 
   /// Foydalanuvchi tanlagan hududlar (hali tayyorlanmagan bo'lishi mumkin)
@@ -61,7 +67,11 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
       if (!mounted) return;
       setState(() {
         _container = s['container'] == true;
-        _enabled = (s['enabled'] ?? 'unknown').toString();
+        _parts = (s['parts'] as int?) ?? CallerIdIos.parts;
+        _enabledCount = (s['enabledCount'] as int?) ?? 0;
+        _states = ((s['states'] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList();
         _last = last;
         _selected = sel;
         _loaded = true;
@@ -71,6 +81,15 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
       debugPrint('callerid_ios status: $e');
     }
   }
+
+  /// Sozlamalarda yoqilmagan bo'laklar raqamlari (1…parts)
+  List<int> get _disabledParts => [
+        for (var i = 0; i < _states.length; i++)
+          if (_states[i] != 'enabled') i + 1,
+      ];
+
+  static String _partNames(List<int> parts) =>
+      parts.map((p) => 'Getcontact $p').join(', ');
 
   Future<void> _build() async {
     setState(() {
@@ -82,7 +101,7 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
     });
 
     try {
-      final n = await RegionCallerId.build(_selected, (p, found, stage) {
+      final r = await RegionCallerId.build(_selected, (p, found, stage) {
         if (!mounted) return;
         setState(() {
           _progress = p;
@@ -91,12 +110,20 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
         });
       });
       if (!mounted) return;
+
+      final b = StringBuffer("Tayyor: ${_fmt(r.count)} ta raqam, "
+          "$_parts bo'lakka bo'lindi.");
+      if (r.disabledParts.isNotEmpty) {
+        b.write(" ${_partNames(r.disabledParts)} Sozlamalarda yoqilmagan — "
+            "ularni yoqing, aks holda ro'yxatning o'sha qismida ism "
+            "chiqmaydi.");
+      } else if (r.count > RegionCallerId.softLimit) {
+        b.write(" Bu iOS chegarasiga yaqin — qo'ng'iroqda ism chiqmasa, "
+            "menga ayting.");
+      }
       setState(() {
-        _msgError = false;
-        _msg = n > RegionCallerId.softLimit
-            ? "Yuklandi: ${_fmt(n)} ta raqam. Bu iOS chegarasiga yaqin — "
-                "qo'ng'iroqda ism chiqmasa, menga ayting."
-            : "Tayyor: ${_fmt(n)} ta raqam yuklandi.";
+        _msgError = r.disabledParts.isNotEmpty;
+        _msg = b.toString();
       });
     } catch (e) {
       if (!mounted) return;
@@ -110,72 +137,6 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
     }
   }
 
-  Future<void> _toggle(String id) async {
-    final next = List.of(_selected);
-    if (next.contains(id)) {
-      if (next.length == 1) return; // kamida bittasi qolsin
-      next.remove(id);
-    } else {
-      next.add(id);
-    }
-    // Ro'yxatdagi tartibda saqlaymiz — matnda ham shu tartibda chiqadi
-    final order = RegionCallerId.regions.map((r) => r.id).toList();
-    next.sort((a, b) => order.indexOf(a).compareTo(order.indexOf(b)));
-    setState(() {
-      _selected = next;
-      _msg = '';
-    });
-    await RegionCallerId.setSelected(next);
-  }
-
-  /// Tanlov oxirgi tayyorlangan ro'yxatdan farq qiladimi
-  bool get _selectionChanged {
-    final last = _last;
-    if (last == null) return false;
-    final a = {...last.$3};
-    final b = {..._selected};
-    return a.length != b.length || !a.containsAll(b);
-  }
-
-  Widget _chip(CallerRegion r) {
-    final on = _selected.contains(r.id);
-    return Material(
-      color: on ? const Color(0xFF1F63D6) : AppColors.inputBg,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _busy ? null : () => _toggle(r.id),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: on ? const Color(0xFF3D82EE) : AppColors.inputBorder,
-              width: 1.2,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (on) ...[
-                const Icon(Icons.check, size: 14, color: Colors.white),
-                const SizedBox(width: 4),
-              ],
-              Text(
-                r.name,
-                style: TextStyle(
-                  color: on ? Colors.white : AppColors.accent,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _clear() async {
     setState(() => _busy = true);
     final err = await RegionCallerId.clear();
@@ -186,6 +147,31 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
       _msg = err ?? "Ro'yxat o'chirildi";
     });
     await _refresh();
+  }
+
+  /// Viloyatlar ro'yxati — alohida oynada, panelni to'ldirib yubormasin
+  Future<void> _pickRegions() async {
+    final picked = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _RegionSheet(initial: _selected),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _selected = picked;
+      _msg = '';
+    });
+    await RegionCallerId.setSelected(picked);
+  }
+
+  /// Tanlov oxirgi tayyorlangan ro'yxatdan farq qiladimi
+  bool get _selectionChanged {
+    final last = _last;
+    if (last == null) return false;
+    final a = {...last.$3};
+    final b = {..._selected};
+    return a.length != b.length || !a.containsAll(b);
   }
 
   static String _fmt(int n) {
@@ -231,7 +217,7 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
   Widget build(BuildContext context) {
     if (!_loaded) return const SizedBox.shrink();
 
-    final enabled = _enabled == 'enabled';
+    final allEnabled = _enabledCount >= _parts;
     final last = _last;
 
     return Padding(
@@ -248,7 +234,7 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
             ),
           ),
           const Text(
-            "Tanlangan hududlardagi abonentlar qo'ng'iroq qilganda, "
+            "Tanlangan viloyatlardagi abonentlar qo'ng'iroq qilganda, "
             "iPhone raqam ostida ismni o'zi ko'rsatadi. Ro'yxat telefonda "
             "qoladi, internetga chiqmaydi.",
             style: TextStyle(
@@ -257,22 +243,60 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
               height: 1.4,
             ),
           ),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: RegionCallerId.regions.map(_chip).toList(),
-          ),
-          const Text(
-            "iOS bitta ro'yxatga taxminan 1,5–2 mln raqam qabul qiladi. "
-            "Katta viloyatlar (Samarqand, Farg'ona, Toshkent va h.k.) "
-            "o'zi yolg'iz shu chegaraga yetishi mumkin — avval bittadan "
-            "sinab ko'ring.",
-            style: TextStyle(
-              color: AppColors.hint,
-              fontSize: 12,
-              height: 1.35,
+
+          // ── Viloyatlar: bitta tugma, ro'yxat alohida oynada ──
+          Material(
+            color: AppColors.inputBg,
+            borderRadius: BorderRadius.circular(14),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _busy ? null : _pickRegions,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.inputBorder, width: 1.2),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.map_outlined,
+                        size: 20, color: AppColors.accent),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Viloyatlar',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            RegionCallerId.names(_selected),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.labelBlue,
+                              fontSize: 12,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right,
+                        size: 22, color: AppColors.accent),
+                  ],
+                ),
+              ),
             ),
           ),
+
           _row(
             _container,
             _container
@@ -281,12 +305,13 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
                     "yoki SideStore orqali o'rnating",
           ),
           _row(
-            enabled,
-            enabled
-                ? 'Sozlamalarda yoqilgan'
-                : "Sozlamalarda yoqilmagan: Настройки → Приложения → "
-                    "Телефон → Блокировка и идентификация вызовов → "
-                    "Getcontact",
+            allEnabled,
+            allEnabled
+                ? 'Sozlamalarda yoqilgan: $_enabledCount/$_parts'
+                : "Sozlamalarda yoqilgan: $_enabledCount/$_parts. "
+                    "Yoqing: ${_partNames(_disabledParts)}\n"
+                    "Настройки → Приложения → Телефон → Блокировка и "
+                    "идентификация вызовов",
           ),
           _row(
             last != null,
@@ -297,8 +322,8 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
           ),
           if (_selectionChanged && !_busy)
             const Text(
-              "Tanlov o'zgardi — yangi ro'yxat uchun «Ro'yxatni yangilash» "
-              "ni bosing.",
+              "Viloyatlar o'zgardi — yangi ro'yxat uchun «Ro'yxatni "
+              "yangilash» ni bosing.",
               style: TextStyle(
                 color: AppColors.accent,
                 fontSize: 12,
@@ -341,7 +366,7 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
               height: 50,
               onTap: _container ? _build : null,
             ),
-            if (!enabled)
+            if (!allEnabled)
               SizedBox(
                 width: double.infinity,
                 child: GhostBtn(
@@ -368,6 +393,139 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
               ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Viloyatlarni tanlash oynasi. Natija — tanlangan id'lar
+/// (bekor qilinsa null). Kamida bitta viloyat tanlangan bo'lishi shart.
+class _RegionSheet extends StatefulWidget {
+  final List<String> initial;
+  const _RegionSheet({required this.initial});
+
+  @override
+  State<_RegionSheet> createState() => _RegionSheetState();
+}
+
+class _RegionSheetState extends State<_RegionSheet> {
+  late final Set<String> _sel = {...widget.initial};
+
+  void _toggle(String id) {
+    setState(() {
+      if (_sel.contains(id)) {
+        if (_sel.length > 1) _sel.remove(id); // kamida bittasi qolsin
+      } else {
+        _sel.add(id);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxH = MediaQuery.of(context).size.height * 0.85;
+    // Ro'yxatdagi tartibda qaytaramiz — matnda ham shu tartibda chiqadi
+    final ordered = [
+      for (final r in RegionCallerId.regions)
+        if (_sel.contains(r.id)) r.id,
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Container(
+        constraints: BoxConstraints(maxHeight: maxH),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        decoration: BoxDecoration(
+          color: AppColors.cardBg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF1F529E), width: 1.2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Viloyatlar',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              "Ro'yxat 4 bo'lakka bo'linadi, har biriga taxminan "
+              "1,5 mln raqam sig'adi. Bir nechta katta viloyatni birga "
+              "tanlasangiz, chegaradan oshishi mumkin.",
+              style: TextStyle(
+                color: AppColors.hint,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final r in RegionCallerId.regions)
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () => _toggle(r.id),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 11, horizontal: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _sel.contains(r.id)
+                                    ? Icons.check_box
+                                    : Icons.check_box_outline_blank,
+                                size: 22,
+                                color: _sel.contains(r.id)
+                                    ? AppColors.accent
+                                    : AppColors.hint,
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                r.name,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: GhostBtn(
+                    text: 'Bekor',
+                    onTap: () => Navigator.pop(context),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: PrimaryBtn(
+                    text: 'Tayyor',
+                    height: 50,
+                    onTap: () => Navigator.pop(context, ordered),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

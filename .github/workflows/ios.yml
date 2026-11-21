@@ -46,9 +46,9 @@ jobs:
       - name: CocoaPods
         run: cd ios && pod install --repo-update
 
-      # iPhone caller ID (Jizzax): Call Directory extension target'i.
+      # iPhone caller ID: 4 ta Call Directory extension target'i.
       # xcodeproj gem'i CocoaPods bilan birga keladi; bo'lmasa o'rnatamiz.
-      - name: Call Directory extension
+      - name: Call Directory extension'lar (4 ta)
         run: |
           ruby -e "require 'xcodeproj'" 2>/dev/null || gem install --user-install --no-document xcodeproj
           ruby tool/ios/add_call_directory.rb
@@ -87,15 +87,19 @@ jobs:
       - name: Entitlements (ad-hoc imzo)
         run: |
           APP=build/ios/iphoneos/Runner.app
-          APPEX="$APP/PlugIns/CallDirectory.appex"
-          test -d "$APPEX" || { echo "❌ CallDirectory.appex ilovada yo'q"; ls -la "$APP" "$APP/PlugIns" || true; exit 1; }
           find "$APP/Frameworks" -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) \
             -exec codesign -f -s - {} \;
-          codesign -f -s - --entitlements ios/CallDirectory/CallDirectory.entitlements "$APPEX"
+          # 4 ta Call Directory extension (add_call_directory.rb dagi PARTS).
+          # Ichkilar tashqi ilovadan OLDIN imzolanishi shart.
+          for E in CallDirectory CallDirectory2 CallDirectory3 CallDirectory4; do
+            APPEX="$APP/PlugIns/$E.appex"
+            test -d "$APPEX" || { echo "❌ $E.appex ilovada yo'q"; ls -la "$APP/PlugIns" || true; exit 1; }
+            codesign -f -s - --entitlements ios/CallDirectory/CallDirectory.entitlements "$APPEX"
+            echo "── $E:"
+            plutil -p "$APPEX/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleDisplayName|NSExtensionPrincipalClass'
+          done
           codesign -f -s - --entitlements ios/Runner/Runner.entitlements "$APP"
           echo "── Runner entitlements:"; codesign -d --entitlements - "$APP" 2>/dev/null | tail -n +1
-          echo "── Extension entitlements:"; codesign -d --entitlements - "$APPEX" 2>/dev/null | tail -n +1
-          plutil -p "$APPEX/Info.plist" | grep -E 'CFBundleIdentifier|NSExtensionPointIdentifier|CFBundleShortVersionString'
 
       - name: IPA arxivlash
         run: |
