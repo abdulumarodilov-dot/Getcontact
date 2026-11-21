@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # gh release uchun yozish huquqi kerak
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -63,3 +66,16 @@ jobs:
         with:
           name: getcontact-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      # Telefon brauzeridan "artifact" ni yuklab bo'lmaydi — reliz esa
+      # oddiy havola, to'g'ridan-to'g'ri yuklanadi.
+      - name: Relizga joylash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk Getcontact.apk
+          gh release create "apk-${{ github.run_number }}" Getcontact.apk \
+            --target "${{ github.sha }}" \
+            --title "Getcontact APK #${{ github.run_number }} (${{ github.ref_name }})" \
+            --notes "Android uchun APK, shox: ${{ github.ref_name }}." \
+          || echo "⚠️ Relizga joylab bo'lmadi — artefakt baribir saqlandi"

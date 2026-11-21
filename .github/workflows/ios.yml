@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    # gh release uchun yozish huquqi kerak
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -113,3 +116,17 @@ jobs:
         with:
           name: getcontact-ipa
           path: build/Getcontact.ipa
+
+      # Telefon brauzeridan "artifact" ni yuklab bo'lmaydi — u GitHub'ga
+      # kirishni talab qiladi va Microsoft serveriga yo'naltiradi. Reliz esa
+      # oddiy havola: iPhone'dagi Safari'da ochib, to'g'ridan-to'g'ri
+      # Fayllar'ga yuklab olasiz, keyin AltStore → +.
+      - name: Relizga joylash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "ios-${{ github.run_number }}" build/Getcontact.ipa \
+            --target "${{ github.sha }}" \
+            --title "Getcontact IPA #${{ github.run_number }} (${{ github.ref_name }})" \
+            --notes "iPhone uchun imzosiz IPA, shox: ${{ github.ref_name }}. AltStore yoki Sideloadly bilan o'rnating." \
+          || echo "⚠️ Relizga joylab bo'lmadi — artefakt baribir saqlandi"
