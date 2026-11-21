@@ -1,13 +1,13 @@
 import 'package:callerid_ios/callerid_ios.dart';
 import 'package:flutter/material.dart';
 
-import '../services/jizzax_callerid.dart';
+import '../services/region_callerid.dart';
 import '../theme.dart';
 import 'common.dart';
 
 /// Sozlamalardagi «Qo'ng'iroqda ko'rsatish» bo'limi — faqat iPhone.
 ///
-/// Jizzax viloyati abonentlarining ro'yxatini tayyorlaydi; iOS kiruvchi
+/// Tanlangan hududlar abonentlarining ro'yxatini tayyorlaydi; iOS kiruvchi
 /// qo'ng'iroqda raqam ostida ismni o'zi ko'rsatadi.
 class IosCallerIdPanel extends StatefulWidget {
   const IosCallerIdPanel({super.key});
@@ -21,7 +21,10 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
   bool _loaded = false;
   bool _container = false;
   String _enabled = 'unknown'; // enabled | disabled | unknown
-  (int, DateTime)? _last;
+  (int, DateTime, List<String>)? _last;
+
+  /// Foydalanuvchi tanlagan hududlar (hali tayyorlanmagan bo'lishi mumkin)
+  List<String> _selected = List.of(RegionCallerId.defaultSelection);
 
   bool _busy = false;
   double _progress = 0;
@@ -53,12 +56,14 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
   Future<void> _refresh() async {
     try {
       final s = await CallerIdIos.status();
-      final last = await JizzaxCallerId.lastBuild();
+      final last = await RegionCallerId.lastBuild();
+      final sel = await RegionCallerId.selected();
       if (!mounted) return;
       setState(() {
         _container = s['container'] == true;
         _enabled = (s['enabled'] ?? 'unknown').toString();
         _last = last;
+        _selected = sel;
         _loaded = true;
       });
     } catch (e) {
@@ -77,7 +82,7 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
     });
 
     try {
-      final n = await JizzaxCallerId.build((p, found, stage) {
+      final n = await RegionCallerId.build(_selected, (p, found, stage) {
         if (!mounted) return;
         setState(() {
           _progress = p;
@@ -88,7 +93,7 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
       if (!mounted) return;
       setState(() {
         _msgError = false;
-        _msg = n > JizzaxCallerId.softLimit
+        _msg = n > RegionCallerId.softLimit
             ? "Yuklandi: ${_fmt(n)} ta raqam. Bu iOS chegarasiga yaqin — "
                 "qo'ng'iroqda ism chiqmasa, menga ayting."
             : "Tayyor: ${_fmt(n)} ta raqam yuklandi.";
@@ -105,9 +110,75 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
     }
   }
 
+  Future<void> _toggle(String id) async {
+    final next = List.of(_selected);
+    if (next.contains(id)) {
+      if (next.length == 1) return; // kamida bittasi qolsin
+      next.remove(id);
+    } else {
+      next.add(id);
+    }
+    // Ro'yxatdagi tartibda saqlaymiz — matnda ham shu tartibda chiqadi
+    final order = RegionCallerId.regions.map((r) => r.id).toList();
+    next.sort((a, b) => order.indexOf(a).compareTo(order.indexOf(b)));
+    setState(() {
+      _selected = next;
+      _msg = '';
+    });
+    await RegionCallerId.setSelected(next);
+  }
+
+  /// Tanlov oxirgi tayyorlangan ro'yxatdan farq qiladimi
+  bool get _selectionChanged {
+    final last = _last;
+    if (last == null) return false;
+    final a = {...last.$3};
+    final b = {..._selected};
+    return a.length != b.length || !a.containsAll(b);
+  }
+
+  Widget _chip(CallerRegion r) {
+    final on = _selected.contains(r.id);
+    return Material(
+      color: on ? const Color(0xFF1F63D6) : AppColors.inputBg,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _busy ? null : () => _toggle(r.id),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: on ? const Color(0xFF3D82EE) : AppColors.inputBorder,
+              width: 1.2,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (on) ...[
+                const Icon(Icons.check, size: 14, color: Colors.white),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                r.name,
+                style: TextStyle(
+                  color: on ? Colors.white : AppColors.accent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _clear() async {
     setState(() => _busy = true);
-    final err = await JizzaxCallerId.clear();
+    final err = await RegionCallerId.clear();
     if (!mounted) return;
     setState(() {
       _busy = false;
@@ -177,13 +248,29 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
             ),
           ),
           const Text(
-            "Manzili Jizzax viloyati bo'lgan abonentlar qo'ng'iroq "
-            "qilganda, iPhone raqam ostida ismni o'zi ko'rsatadi. "
-            "Ro'yxat telefonda qoladi, internetga chiqmaydi.",
+            "Tanlangan hududlardagi abonentlar qo'ng'iroq qilganda, "
+            "iPhone raqam ostida ismni o'zi ko'rsatadi. Ro'yxat telefonda "
+            "qoladi, internetga chiqmaydi.",
             style: TextStyle(
               color: AppColors.labelBlue,
               fontSize: 13,
               height: 1.4,
+            ),
+          ),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: RegionCallerId.regions.map(_chip).toList(),
+          ),
+          const Text(
+            "iOS bitta ro'yxatga taxminan 1,5–2 mln raqam qabul qiladi. "
+            "Katta viloyatlar (Samarqand, Farg'ona, Toshkent va h.k.) "
+            "o'zi yolg'iz shu chegaraga yetishi mumkin — avval bittadan "
+            "sinab ko'ring.",
+            style: TextStyle(
+              color: AppColors.hint,
+              fontSize: 12,
+              height: 1.35,
             ),
           ),
           _row(
@@ -204,9 +291,20 @@ class _IosCallerIdPanelState extends State<IosCallerIdPanel>
           _row(
             last != null,
             last != null
-                ? "Ro'yxat: ${_fmt(last.$1)} ta raqam (${_date(last.$2)})"
+                ? "Ro'yxat: ${RegionCallerId.names(last.$3)} — "
+                    "${_fmt(last.$1)} ta raqam (${_date(last.$2)})"
                 : "Ro'yxat hali tayyorlanmagan",
           ),
+          if (_selectionChanged && !_busy)
+            const Text(
+              "Tanlov o'zgardi — yangi ro'yxat uchun «Ro'yxatni yangilash» "
+              "ni bosing.",
+              style: TextStyle(
+                color: AppColors.accent,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
           if (_busy) ...[
             LinearProgressIndicator(
               value: _progress,
